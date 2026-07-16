@@ -32,6 +32,14 @@ function fileToBase64(file) {
     reader.readAsDataURL(file);
   });
 }
+/** Large files (big photos, scanned PDFs) can be slow enough to time out Apps Script. Warn before attempting those. */
+function checkFileSize_(file, maxMB = 8) {
+  if (file.size > maxMB * 1024 * 1024) {
+    showBanner(`"${file.name}" is ${(file.size / 1024 / 1024).toFixed(1)}MB — files over ${maxMB}MB often fail to upload. Try compressing it first (or take the photo at a lower resolution).`);
+    return false;
+  }
+  return true;
+}
 
 /* Guaranteed logo fallback: if assets/logo.jpg ever fails to load, show a styled text wordmark instead of a blank box. */
 function handleLogoError(img) {
@@ -119,10 +127,26 @@ let state = {
 };
 
 /* ---------------- Data loading + saving (Google Sheets + Drive bridge) ---------------- */
+/** Retries a fetch a couple of times before giving up — Apps Script occasionally responds slowly or hiccups on the first try. */
+async function fetchWithRetry_(url, options, retries = 2) {
+  let lastError;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(url, options);
+      if (!res.ok) throw new Error(`Server responded with status ${res.status}`);
+      return res;
+    } catch (e) {
+      lastError = e;
+      if (attempt < retries) await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
+    }
+  }
+  throw lastError;
+}
+
 async function loadAllData() {
   if (!USE_LIVE_DATA || !SHEETS_API_URL) return { ...MOCK_DATA };
   try {
-    const res = await fetch(SHEETS_API_URL);
+    const res = await fetchWithRetry_(SHEETS_API_URL);
     const data = await res.json();
     return {
       projects: data.projects || [], milestones: data.milestones || [], budgetCategories: data.budgetCategories || [],
@@ -130,27 +154,43 @@ async function loadAllData() {
       payments: data.payments || [], documents: data.documents || [],
     };
   } catch (e) {
-    console.error("Failed to load live data, falling back to mock data:", e);
-    alert("Couldn't load your Google Sheet data — showing sample data instead. Check the Apps Script URL in app.js and that it's deployed.");
+    console.error("Failed to load live data after retrying, falling back to mock data:", e);
+    showBanner(`Couldn't load your Google Sheet after a few tries (${e.message || e}) — showing sample data. Try refreshing the page.`);
     return { ...MOCK_DATA };
   }
 }
 async function postToSheet(action, payload) {
   if (!USE_LIVE_DATA || !SHEETS_API_URL) { console.log("(offline mode)", action, payload); return { success: true, offline: true }; }
   try {
-    const res = await fetch(SHEETS_API_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action, ...payload }) });
+    const res = await fetchWithRetry_(SHEETS_API_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action, ...payload }) });
     const result = await res.json();
     if (!result.success) {
       console.error("Save failed:", action, result.error);
-      alert("Couldn't save this — " + (result.error || "unknown error") + "\n\nCheck that your Google Sheet has a tab and headers matching this action, then try again.");
+      showBanner(`Couldn't save that (${result.error || "unknown error"}) — check the Sheet tab/headers for this, then try again.`);
     }
     return result;
   } catch (e) {
-    console.error("Save failed:", e);
-    alert("Couldn't reach the server to save this. Check your internet connection and that the Apps Script URL in app.js is correct.");
+    console.error("Save failed after retrying:", e);
+    showBanner(`Couldn't reach the server to save that, even after a few tries (${e.message || e}). Check your connection and try again.`);
     return { success: false, error: String(e) };
   }
 }
+/** A small dismissible banner instead of a blocking alert() — so a network hiccup doesn't interrupt typing. */
+function showBanner(message) {
+  let banner = document.getElementById("error-banner");
+  if (!banner) {
+    banner = document.createElement("div");
+    banner.id = "error-banner";
+    banner.className = "error-banner";
+    document.body.appendChild(banner);
+  }
+  banner.innerHTML = `<span>⚠️ ${escapeHtml(message)}</span><button id="error-banner-close">✕</button>`;
+  banner.classList.add("visible");
+  document.getElementById("error-banner-close").addEventListener("click", () => banner.classList.remove("visible"));
+  clearTimeout(showBanner._t);
+  showBanner._t = setTimeout(() => banner.classList.remove("visible"), 10000);
+}
+
 async function refreshData() {
   const data = await loadAllData();
   Object.assign(state, data);
@@ -227,6 +267,92 @@ function restoreSession() {
     }
   } catch (e) { /* ignore corrupt/old session data */ }
   return false;
+}
+
+/* ---------------- Live preview cards on the login screen ---------------- */
+function el_(id) { return document.getElementById(id); }
+function setText_(id, text) { const e = el_(id); if (e) e.textContent = text; }
+function formatCompactAED_(n) {
+  return "AED " + new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(Number(n) || 0);
+}
+const STATUS_BADGE_STYLE_ = {
+  "on-track": ["On Track", "var(--good-bg)", "var(--good)"],
+  attention: ["Attention", "var(--warn-bg)", "var(--warn)"],
+  delayed: ["Delayed", "var(--bad-bg)", "var(--bad)"],
+  completed: ["Completed", "var(--graphite-100)", "var(--graphite-600)"],
+};
+const REMARK_BADGE_STYLE_ = {
+  order: ["ORDER", "var(--warn-bg)", "var(--warn)"],
+  question: ["QUESTION", "var(--bad-bg)", "var(--bad)"],
+  remark: ["REMARK", "var(--graphite-100)", "var(--graphite-600)"],
+};
+
+/** Fills the login screen's rotating preview cards with real numbers from the Sheet, before anyone logs in. */
+async function populateLoginPreviews() {
+  if (!USE_LIVE_DATA || !SHEETS_API_URL) return; // no Sheet connected yet — leave the sample content as-is
+  try {
+    const data = await loadAllData();
+    Object.assign(state, data);
+    const projects = state.projects.map(computedProject);
+    if (projects.length === 0) return;
+
+    // Slide 1 — first 3 real projects
+    projects.slice(0, 3).forEach((p, i) => {
+      const n = i + 1;
+      setText_(`lp-proj-${n}-name`, p.name);
+      const badgeEl = el_(`lp-proj-${n}-badge`);
+      if (badgeEl) {
+        const [label, bg, fg] = STATUS_BADGE_STYLE_[p.status] || STATUS_BADGE_STYLE_["on-track"];
+        badgeEl.textContent = label; badgeEl.style.background = bg; badgeEl.style.color = fg;
+      }
+      const barEl = el_(`lp-proj-${n}-bar`); if (barEl) barEl.style.width = `${p.completion}%`;
+      setText_(`lp-proj-${n}-meta`, `${p.completion}% complete · Opening ${formatDate(p.openingDate)}`);
+    });
+    for (let n = projects.length + 1; n <= 3; n++) { const card = el_(`lp-proj-${n}`); if (card) card.style.display = "none"; }
+
+    // Slide 2 — real totals + the supplier with the largest outstanding balance
+    const totalBudget = projects.reduce((s, p) => s + Number(p.budget || 0), 0);
+    const totalOutstanding = projects.reduce((s, p) => s + Number(p.outstanding || 0), 0);
+    setText_("lp-total-budget", formatCompactAED_(totalBudget));
+    setText_("lp-total-budget-sub", `Across ${projects.length} active project${projects.length === 1 ? "" : "s"}`);
+    setText_("lp-outstanding", formatCompactAED_(totalOutstanding));
+
+    let bestSupplier = null, bestBalance = -1;
+    state.suppliers.forEach((s) => {
+      const invoices = state.invoices.filter((i) => i.supplier_id === s.id);
+      const paid = invoices.reduce((sum, i) => sum + state.payments.filter((p) => p.invoice_id === i.id).reduce((s2, p) => s2 + Number(p.amount || 0), 0), 0);
+      const balance = Number(s.contract_value || 0) - paid;
+      if (balance > bestBalance) { bestBalance = balance; bestSupplier = { ...s, paid }; }
+    });
+    const supplierCard = el_("lp-supplier-card");
+    if (bestSupplier && Number(bestSupplier.contract_value) > 0) {
+      const pct = Math.min(100, Math.round((bestSupplier.paid / Number(bestSupplier.contract_value)) * 100));
+      setText_("lp-supplier-name", `${safe(bestSupplier.category, "Supplier")} — ${safe(bestSupplier.name, "Unnamed")}`);
+      const badgeEl = el_("lp-supplier-badge");
+      if (badgeEl) {
+        if (bestBalance > 0) { badgeEl.textContent = "Balance Due"; badgeEl.style.background = "var(--warn-bg)"; badgeEl.style.color = "var(--warn)"; }
+        else { badgeEl.textContent = "Settled"; badgeEl.style.background = "var(--good-bg)"; badgeEl.style.color = "var(--good)"; }
+      }
+      const barEl = el_("lp-supplier-bar"); if (barEl) barEl.style.width = `${pct}%`;
+      setText_("lp-supplier-meta", `${formatAED(bestSupplier.paid)} paid of ${formatAED(bestSupplier.contract_value)}`);
+    } else if (supplierCard) { supplierCard.style.display = "none"; }
+
+    // Slide 3 — 3 most recent real remarks, across all projects
+    const recentRemarks = [...state.remarks].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 3);
+    recentRemarks.forEach((r, i) => {
+      const n = i + 1;
+      setText_(`lp-remark-${n}-author`, r.author || "Team");
+      const badgeEl = el_(`lp-remark-${n}-badge`);
+      if (badgeEl) {
+        const [label, bg, fg] = REMARK_BADGE_STYLE_[r.type] || REMARK_BADGE_STYLE_.remark;
+        badgeEl.textContent = label; badgeEl.style.background = bg; badgeEl.style.color = fg;
+      }
+      setText_(`lp-remark-${n}-text`, `"${r.text}"${r.tagged ? " — tagged " + r.tagged : ""}`);
+    });
+    for (let n = recentRemarks.length + 1; n <= 3; n++) { const card = el_(`lp-remark-${n}`); if (card) card.style.display = "none"; }
+  } catch (e) {
+    console.error("Couldn't load live preview data for login screen — showing sample content instead:", e);
+  }
 }
 
 /* ---------------- Notifications (tagged remarks) ---------------- */
@@ -983,7 +1109,10 @@ function attachSupplierDetailHandlers(el, project) {
       const invoiceNo = form.querySelector(".inv-no").value, amount = form.querySelector(".inv-amount").value, invoiceDate = form.querySelector(".inv-date").value;
       const fileInput = form.querySelector(".inv-file");
       let fileBase64 = "", fileName = "", mimeType = "";
-      if (fileInput.files[0]) { fileBase64 = await fileToBase64(fileInput.files[0]); fileName = fileInput.files[0].name; mimeType = fileInput.files[0].type; }
+      if (fileInput.files[0]) {
+        if (!checkFileSize_(fileInput.files[0])) { btn.disabled = false; btn.textContent = "Add Invoice"; return; }
+        fileBase64 = await fileToBase64(fileInput.files[0]); fileName = fileInput.files[0].name; mimeType = fileInput.files[0].type;
+      }
       await postToSheet("addInvoice", { supplierId, invoiceNo, amount, invoiceDate, projectName: project.name, fileBase64, fileName, mimeType });
       await refreshData(); renderSuppliersTab(el, project);
     });
@@ -998,7 +1127,10 @@ function attachSupplierDetailHandlers(el, project) {
       const amount = form.querySelector(".pay-amount").value, paidDate = form.querySelector(".pay-date").value;
       const fileInput = form.querySelector(".pay-receipt");
       let fileBase64 = "", fileName = "", mimeType = "";
-      if (fileInput.files[0]) { fileBase64 = await fileToBase64(fileInput.files[0]); fileName = fileInput.files[0].name; mimeType = fileInput.files[0].type; }
+      if (fileInput.files[0]) {
+        if (!checkFileSize_(fileInput.files[0])) { btn.disabled = false; btn.textContent = "Record Payment"; return; }
+        fileBase64 = await fileToBase64(fileInput.files[0]); fileName = fileInput.files[0].name; mimeType = fileInput.files[0].type;
+      }
       await postToSheet("addPayment", { invoiceId, amount, paidDate, projectName: project.name, fileBase64, fileName, mimeType });
       await refreshData(); renderSuppliersTab(el, project);
     });
@@ -1043,6 +1175,7 @@ function renderDocumentsTab(el, project) {
       if (!fileInput.files[0]) return;
       const btn = e.target.querySelector("button");
       if (btn.disabled) return;
+      if (!checkFileSize_(fileInput.files[0])) return;
       btn.disabled = true; btn.textContent = "Uploading…";
       const fileBase64 = await fileToBase64(fileInput.files[0]);
       await postToSheet("uploadDocument", { projectId: project.id, projectName: project.name, folder: state.openFolder, fileName: fileInput.files[0].name, mimeType: fileInput.files[0].type, fileBase64, uploadedBy: state.user.name });
@@ -1132,5 +1265,6 @@ function renderFullReportTab(el, project, remaining) {
 document.addEventListener("DOMContentLoaded", () => {
   initLogin();
   document.querySelectorAll(".nav-btn").forEach((b) => { if (b.dataset.route) b.addEventListener("click", () => navigate(b.dataset.route)); });
-  restoreSession();
+  const restored = restoreSession();
+  if (!restored) populateLoginPreviews();
 });
