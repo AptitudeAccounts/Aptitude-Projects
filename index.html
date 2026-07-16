@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Aptitude | Project Control</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@400;500;600&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+
+<!-- ===================== LOGIN VIEW ===================== -->
+<div id="view-login">
+  <div class="glow"></div>
+  <div class="login-card">
+    <div class="login-logo">
+      <img src="assets/logo.jpg" alt="Aptitude Group" />
+      <p>Project Execution &amp; Financial Monitoring</p>
+    </div>
+    <form id="login-form">
+      <p class="field-label">Sign in as</p>
+      <div class="role-grid">
+        <button type="button" class="role-btn active" data-name="Mohamed" data-role="owner">Mohamed<span>Owner</span></button>
+        <button type="button" class="role-btn" data-name="Operations" data-role="operations">Operations<span>Ops Team</span></button>
+        <button type="button" class="role-btn" data-name="Accounts" data-role="accounts">Accounts<span>Finance</span></button>
+      </div>
+      <p class="field-label">Password</p>
+      <div class="input-wrap">
+        🔒 <input type="password" placeholder="••••••••" />
+      </div>
+      <button type="submit" class="login-submit">Sign in →</button>
+    </form>
+    <p class="login-footer">© 2026 Aptitude Group — Internal Project Control System</p>
+  </div>
+</div>
+
+<!-- ===================== APP SHELL ===================== -->
+<div id="app-shell">
+  <aside class="sidebar">
+    <div class="login-logo" style="text-align:left;"><img src="assets/logo.jpg" alt="Aptitude" style="filter:brightness(0) invert(1); height:22px;" /></div>
+    <p class="sidebar-label">Project Control</p>
+    <nav class="nav">
+      <button class="nav-btn active" data-route="dashboard">🏠 Dashboard</button>
+      <button class="nav-btn" data-route="projects">📁 Projects</button>
+    </nav>
+    <div class="user-pill">
+      <div class="avatar" id="sidebar-user-avatar">MO</div>
+      <div><p class="name" id="sidebar-user-name">Mohamed</p><p class="role" id="sidebar-user-role">Owner</p></div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div><h1 id="topbar-title">Executive Dashboard</h1><p id="topbar-subtitle"></p></div>
+    </header>
+    <main class="content" id="content"></main>
+  </div>
+</div>
+
+<script src="assets/app.js"></script>
+</body>
+</html>
