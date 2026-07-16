@@ -150,7 +150,10 @@ async function fetchWithRetry_(url, options, retries = 3, timeoutMs = 30000) {
 async function loadAllData() {
   if (!USE_LIVE_DATA || !SHEETS_API_URL) return { ...MOCK_DATA };
   try {
-    const res = await fetchWithRetry_(SHEETS_API_URL, undefined, 2, 12000);
+    // Cache-bust with a timestamp + cache:"no-store" — otherwise the browser can serve a stale
+    // cached copy of this same GET URL right after a save, making a fresh entry look "missing".
+    const bustUrl = `${SHEETS_API_URL}${SHEETS_API_URL.includes("?") ? "&" : "?"}t=${Date.now()}`;
+    const res = await fetchWithRetry_(bustUrl, { cache: "no-store" }, 2, 12000);
     const data = await res.json();
     return {
       projects: data.projects || [], milestones: data.milestones || [], budgetCategories: data.budgetCategories || [],
