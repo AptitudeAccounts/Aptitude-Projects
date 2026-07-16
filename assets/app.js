@@ -127,17 +127,21 @@ let state = {
 };
 
 /* ---------------- Data loading + saving (Google Sheets + Drive bridge) ---------------- */
-/** Retries a fetch a couple of times before giving up — Apps Script occasionally responds slowly or hiccups on the first try. */
-async function fetchWithRetry_(url, options, retries = 2) {
+/** Retries a fetch several times, with a timeout per attempt, before giving up. */
+async function fetchWithRetry_(url, options, retries = 3, timeoutMs = 30000) {
   let lastError;
   for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const res = await fetch(url, options);
+      const res = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timer);
       if (!res.ok) throw new Error(`Server responded with status ${res.status}`);
       return res;
     } catch (e) {
-      lastError = e;
-      if (attempt < retries) await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
+      clearTimeout(timer);
+      lastError = e.name === "AbortError" ? new Error("Request timed out") : e;
+      if (attempt < retries) await new Promise((r) => setTimeout(r, 900 * Math.pow(1.8, attempt)));
     }
   }
   throw lastError;
@@ -146,7 +150,7 @@ async function fetchWithRetry_(url, options, retries = 2) {
 async function loadAllData() {
   if (!USE_LIVE_DATA || !SHEETS_API_URL) return { ...MOCK_DATA };
   try {
-    const res = await fetchWithRetry_(SHEETS_API_URL);
+    const res = await fetchWithRetry_(SHEETS_API_URL, undefined, 3, 20000);
     const data = await res.json();
     return {
       projects: data.projects || [], milestones: data.milestones || [], budgetCategories: data.budgetCategories || [],
@@ -155,14 +159,14 @@ async function loadAllData() {
     };
   } catch (e) {
     console.error("Failed to load live data after retrying, falling back to mock data:", e);
-    showBanner(`Couldn't load your Google Sheet after a few tries (${e.message || e}) — showing sample data. Try refreshing the page.`);
+    showBanner(`Couldn't load your Google Sheet after several tries (${e.message || e}) — showing sample data. This usually means the Apps Script deployment or connection needs attention.`, true);
     return { ...MOCK_DATA };
   }
 }
 async function postToSheet(action, payload) {
   if (!USE_LIVE_DATA || !SHEETS_API_URL) { console.log("(offline mode)", action, payload); return { success: true, offline: true }; }
   try {
-    const res = await fetchWithRetry_(SHEETS_API_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action, ...payload }) });
+    const res = await fetchWithRetry_(SHEETS_API_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action, ...payload }) }, 3, 45000);
     const result = await res.json();
     if (!result.success) {
       console.error("Save failed:", action, result.error);
@@ -171,12 +175,12 @@ async function postToSheet(action, payload) {
     return result;
   } catch (e) {
     console.error("Save failed after retrying:", e);
-    showBanner(`Couldn't reach the server to save that, even after a few tries (${e.message || e}). Check your connection and try again.`);
+    showBanner(`Couldn't reach the server to save that, even after several tries (${e.message || e}). This usually means the Apps Script deployment or connection needs attention.`, true);
     return { success: false, error: String(e) };
   }
 }
 /** A small dismissible banner instead of a blocking alert() — so a network hiccup doesn't interrupt typing. */
-function showBanner(message) {
+function showBanner(message, showRetry) {
   let banner = document.getElementById("error-banner");
   if (!banner) {
     banner = document.createElement("div");
@@ -184,11 +188,18 @@ function showBanner(message) {
     banner.className = "error-banner";
     document.body.appendChild(banner);
   }
-  banner.innerHTML = `<span>⚠️ ${escapeHtml(message)}</span><button id="error-banner-close">✕</button>`;
+  banner.innerHTML = `<span>⚠️ ${escapeHtml(message)}</span><span style="display:flex;gap:0.5rem;flex-shrink:0;">${showRetry ? `<button id="error-banner-retry">Retry now</button>` : ""}<button id="error-banner-close">✕</button></span>`;
   banner.classList.add("visible");
   document.getElementById("error-banner-close").addEventListener("click", () => banner.classList.remove("visible"));
+  if (showRetry) {
+    document.getElementById("error-banner-retry").addEventListener("click", async () => {
+      banner.classList.remove("visible");
+      await refreshData();
+      if (state.route) render();
+    });
+  }
   clearTimeout(showBanner._t);
-  showBanner._t = setTimeout(() => banner.classList.remove("visible"), 10000);
+  showBanner._t = setTimeout(() => banner.classList.remove("visible"), 15000);
 }
 
 async function refreshData() {
