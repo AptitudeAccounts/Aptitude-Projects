@@ -13,27 +13,56 @@
 
 <!-- ===================== LOGIN VIEW ===================== -->
 <div id="view-login">
-  <div class="glow"></div>
-  <div class="login-card">
-    <div class="login-logo">
-      <img class="logo-img" src="assets/logo.jpg" alt="Aptitude Group" style="background:white; padding:10px 20px; border-radius:10px;" onerror="handleLogoError(this)" />
-      <p>Project Execution &amp; Financial Monitoring</p>
+  <div class="login-shell">
+    <div class="login-visual">
+      <div class="grid-lines"></div>
+      <div class="glow2"></div>
+      <div class="brand-copy">
+        <h2>Every project, thirty seconds to understand.</h2>
+        <p>Budgets, milestones, suppliers and approvals for every restaurant, café and kiosk opening — in one place.</p>
+      </div>
+      <div class="preview-stack">
+        <div class="preview-card">
+          <div class="pc-top"><span class="pc-name">Marina Walk Café</span><span class="pc-badge" style="background:var(--good-bg);color:var(--good);">On Track</span></div>
+          <div class="pc-bar"><div class="pc-bar-fill" style="width:78%;"></div></div>
+          <p class="pc-meta">78% complete · Opening Sep 2026</p>
+        </div>
+        <div class="preview-card">
+          <div class="pc-top"><span class="pc-name">Reem Island Bistro</span><span class="pc-badge" style="background:var(--bad-bg);color:var(--bad);">Delayed</span></div>
+          <div class="pc-bar"><div class="pc-bar-fill" style="width:31%;"></div></div>
+          <p class="pc-meta">31% complete · Opening Nov 2026</p>
+        </div>
+        <div class="preview-card">
+          <div class="pc-top"><span class="pc-name">Al Ain Downtown Café</span><span class="pc-badge" style="background:var(--good-bg);color:var(--good);">On Track</span></div>
+          <div class="pc-bar"><div class="pc-bar-fill" style="width:92%;"></div></div>
+          <p class="pc-meta">92% complete · Opening Aug 2026</p>
+        </div>
+      </div>
     </div>
-    <form id="login-form">
-      <p class="field-label">Sign in as</p>
-      <div class="role-grid">
-        <button type="button" class="role-btn active" data-name="Mohamed" data-role="owner">Mohamed<span>Owner</span></button>
-        <button type="button" class="role-btn" data-name="Deven" data-role="operations">Deven<span>Ops Manager</span></button>
-        <button type="button" class="role-btn" data-name="Mansoor" data-role="accounts">Mansoor<span>Accountant</span></button>
+
+    <div class="login-panel">
+      <div class="login-card">
+        <div class="login-logo">
+          <img class="logo-img" src="assets/logo.jpg" alt="Aptitude Group" style="background:white; padding:10px 20px; border-radius:10px;" onerror="handleLogoError(this)" />
+          <p>Project Execution &amp; Financial Monitoring</p>
+        </div>
+        <form id="login-form">
+          <p class="field-label">Sign in as</p>
+          <div class="role-grid">
+            <button type="button" class="role-btn active" data-name="Mohamed" data-role="owner">Mohamed<span>Owner</span></button>
+            <button type="button" class="role-btn" data-name="Deven" data-role="operations">Deven<span>Ops Manager</span></button>
+            <button type="button" class="role-btn" data-name="Mansoor" data-role="accounts">Mansoor<span>Accountant</span></button>
+          </div>
+          <p class="field-label">Password</p>
+          <div class="input-wrap">
+            🔒 <input type="password" id="login-password" placeholder="Enter your code" />
+          </div>
+          <p id="login-error" style="color:#D14343;font-size:0.78rem;margin:0.5rem 0 0;display:none;">Incorrect code for this user. Please try again.</p>
+          <button type="submit" class="login-submit">Sign in →</button>
+        </form>
+        <p class="login-footer">© 2026 Aptitude Group — Internal Project Control System</p>
       </div>
-      <p class="field-label">Password</p>
-      <div class="input-wrap">
-        🔒 <input type="password" id="login-password" placeholder="Enter your code" />
-      </div>
-      <p id="login-error" style="color:#D14343;font-size:0.78rem;margin:0.5rem 0 0;display:none;">Incorrect code for this user. Please try again.</p>
-      <button type="submit" class="login-submit">Sign in →</button>
-    </form>
-    <p class="login-footer">© 2026 Aptitude Group — Internal Project Control System</p>
+    </div>
   </div>
 </div>
 
