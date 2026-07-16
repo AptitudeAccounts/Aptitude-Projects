@@ -122,7 +122,7 @@ const MOCK_DATA = {
 let state = {
   user: { name: "Mohamed", role: "owner" },
   route: "dashboard", projectId: null, workspaceTab: "Overview", openFolder: null, openSupplierId: null,
-  expandedKpi: null, notifOpen: false, editingSupplierId: null,
+  expandedKpi: null, notifOpen: false, editingSupplierId: null, editingInvoiceId: null, editingPaymentId: null,
   projects: [], milestones: [], budgetCategories: [], remarks: [], suppliers: [], invoices: [], payments: [], documents: [],
 };
 
@@ -416,7 +416,7 @@ function toggleNotifPanel() {
 /* ---------------- Navigation ---------------- */
 function navigate(route, projectId) {
   state.route = route; state.projectId = projectId || null; state.workspaceTab = "Overview";
-  state.openFolder = null; state.openSupplierId = null; state.expandedKpi = null; state.editingSupplierId = null;
+  state.openFolder = null; state.openSupplierId = null; state.expandedKpi = null; state.editingSupplierId = null; state.editingInvoiceId = null; state.editingPaymentId = null;
   document.querySelectorAll(".nav-btn").forEach((b) => b.classList.toggle("active", b.dataset.route === route));
   render();
 }
@@ -706,7 +706,7 @@ function renderWorkspace(el) {
     <div class="tabs">${tabs.map((t) => `<button class="tab-btn ${state.workspaceTab === t ? "active" : ""}" data-tab="${t}">${t}</button>`).join("")}</div>
     <div id="tab-content" style="margin-top:1.5rem;"></div>`;
   document.getElementById("crumb-projects").addEventListener("click", (e) => { e.preventDefault(); navigate("projects"); });
-  el.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => { state.workspaceTab = b.dataset.tab; state.openFolder = null; state.openSupplierId = null; state.editingSupplierId = null; renderWorkspace(el); }));
+  el.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => { state.workspaceTab = b.dataset.tab; state.openFolder = null; state.openSupplierId = null; state.editingSupplierId = null; state.editingInvoiceId = null; state.editingPaymentId = null; renderWorkspace(el); }));
   document.getElementById("toggle-edit-project").addEventListener("click", () => { showEditProject = !showEditProject; renderEditProjectForm(el, rawProject); });
   document.getElementById("delete-project-btn").addEventListener("click", async () => {
     const typed = prompt(`This permanently deletes "${project.name}" AND every milestone, budget category, supplier, invoice, payment, remark and document under it.\n\nType the project name exactly to confirm:`);
@@ -1135,22 +1135,42 @@ function renderSupplierDetail(project, supplier, invoices) {
       invoices.map((inv) => {
         const pays = state.payments.filter((p) => p.invoice_id === inv.id);
         const paid = pays.reduce((s, p) => s + Number(p.amount || 0), 0);
+        const editingInv = state.editingInvoiceId === inv.id;
         return `<div style="border:1px solid var(--graphite-100);border-radius:0.6rem;padding:0.7rem;margin-bottom:0.6rem;">
           <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:0.4rem;">
             <p style="font-size:0.85rem;font-weight:600;margin:0;">Invoice ${escapeHtml(inv.invoice_no)} — ${formatAED(inv.amount)}</p>
             <div style="display:flex;align-items:center;gap:0.5rem;">
               <p style="font-size:0.75rem;color:var(--graphite-500);margin:0;">${formatDate(inv.invoice_date)} ${inv.file_url ? `· <a href="${inv.file_url}" target="_blank" style="color:var(--brass-600);">View invoice</a>` : ""}</p>
+              <button class="filter-btn edit-invoice-btn" data-id="${inv.id}" style="padding:0.15rem 0.4rem;font-size:0.7rem;">${editingInv ? "✕" : "✏️"}</button>
               <button class="filter-btn delete-invoice-btn" data-id="${inv.id}" style="padding:0.15rem 0.4rem;color:var(--bad);font-size:0.7rem;">🗑️</button>
             </div>
           </div>
+          ${editingInv ? `
+            <form class="edit-invoice-form" data-id="${inv.id}" style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.5rem;">
+              <input class="ei-no" value="${escapeHtml(inv.invoice_no || "")}" placeholder="Invoice #" style="width:110px;border:1px solid var(--graphite-200);border-radius:0.4rem;padding:0.3rem 0.5rem;font-size:0.78rem;" />
+              <input class="ei-amount" type="number" value="${Number(inv.amount || 0)}" placeholder="Amount" style="width:110px;border:1px solid var(--graphite-200);border-radius:0.4rem;padding:0.3rem 0.5rem;font-size:0.78rem;" />
+              <input class="ei-date" type="date" value="${inv.invoice_date ? String(inv.invoice_date).slice(0, 10) : ""}" style="border:1px solid var(--graphite-200);border-radius:0.4rem;padding:0.3rem 0.5rem;font-size:0.78rem;" />
+              <button type="submit" class="login-submit" style="width:auto;padding:0.3rem 0.8rem;margin:0;">Save</button>
+            </form>` : `
           <p style="font-size:0.78rem;color:var(--graphite-500);margin:0.3rem 0 0;">Paid: <b class="mono">${formatAED(paid)}</b> · Balance: <b class="mono">${formatAED(Number(inv.amount) - paid)}</b></p>
-          ${pays.map((p) => `<p style="font-size:0.75rem;color:var(--graphite-600);margin:0.2rem 0 0;display:flex;align-items:center;gap:0.4rem;">💳 ${formatAED(p.amount)} on ${formatDate(p.paid_date)} ${p.receipt_url ? `· <a href="${p.receipt_url}" target="_blank" style="color:var(--brass-600);">Bank receipt</a>` : "(no receipt attached)"} <button class="filter-btn delete-payment-btn" data-id="${p.id}" style="padding:0.1rem 0.35rem;color:var(--bad);font-size:0.68rem;">🗑️</button></p>`).join("")}
+          ${pays.map((p) => {
+            const editingPay = state.editingPaymentId === p.id;
+            if (editingPay) {
+              return `<form class="edit-payment-form" data-id="${p.id}" style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.3rem;align-items:center;">
+                <span style="font-size:0.7rem;color:var(--graphite-400);">Editing payment:</span>
+                <input class="ep-amount" type="number" value="${Number(p.amount || 0)}" style="width:110px;border:1px solid var(--graphite-200);border-radius:0.4rem;padding:0.25rem 0.4rem;font-size:0.75rem;" />
+                <input class="ep-date" type="date" value="${p.paid_date ? String(p.paid_date).slice(0, 10) : ""}" style="border:1px solid var(--graphite-200);border-radius:0.4rem;padding:0.25rem 0.4rem;font-size:0.75rem;" />
+                <button type="submit" class="filter-btn" style="padding:0.2rem 0.6rem;font-size:0.72rem;">Save</button>
+              </form>`;
+            }
+            return `<p style="font-size:0.75rem;color:var(--graphite-600);margin:0.2rem 0 0;display:flex;align-items:center;gap:0.4rem;">💳 ${formatAED(p.amount)} on ${formatDate(p.paid_date)} ${p.receipt_url ? `· <a href="${p.receipt_url}" target="_blank" style="color:var(--brass-600);">Bank receipt</a>` : "(no receipt attached)"} <button class="filter-btn edit-payment-btn" data-id="${p.id}" style="padding:0.08rem 0.3rem;font-size:0.66rem;">✏️</button> <button class="filter-btn delete-payment-btn" data-id="${p.id}" style="padding:0.1rem 0.35rem;color:var(--bad);font-size:0.68rem;">🗑️</button></p>`;
+          }).join("")}
           <form class="add-payment-form" data-invoice="${inv.id}" style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.5rem;">
             <input type="number" class="pay-amount" placeholder="Amount paid" required style="width:120px;border:1px solid var(--graphite-200);border-radius:0.4rem;padding:0.3rem 0.5rem;font-size:0.78rem;" />
             <input type="date" class="pay-date" required style="border:1px solid var(--graphite-200);border-radius:0.4rem;padding:0.3rem 0.5rem;font-size:0.78rem;" />
             <input type="file" class="pay-receipt" style="font-size:0.75rem;" />
             <button type="submit" class="filter-btn" style="padding:0.3rem 0.6rem;">Record Payment</button>
-          </form>
+          </form>`}
         </div>`;
       }).join("")}
     <form class="add-invoice-form" data-supplier="${supplier.id}" style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.5rem;">
@@ -1200,6 +1220,51 @@ function attachSupplierDetailHandlers(el, project) {
       const result = await postToSheet("addPayment", { invoiceId, amount, paidDate, projectName: project.name, fileBase64, fileName, mimeType });
       btn.textContent = result.success ? "Saved ✓" : "Failed — see banner above";
       if (!result.success) { btn.disabled = false; return; }
+      await refreshData(); renderSuppliersTab(el, project);
+    });
+  });
+  el.querySelectorAll(".edit-invoice-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.editingInvoiceId = state.editingInvoiceId === btn.dataset.id ? null : btn.dataset.id;
+      renderSuppliersTab(el, project);
+    });
+  });
+  el.querySelectorAll(".edit-invoice-form").forEach((form) => {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = form.querySelector('button[type="submit"]');
+      if (btn.disabled) return;
+      btn.disabled = true; btn.textContent = "Saving…";
+      const invoiceId = form.dataset.id;
+      const invoiceNo = form.querySelector(".ei-no").value;
+      const amount = form.querySelector(".ei-amount").value;
+      const invoiceDate = form.querySelector(".ei-date").value;
+      const result = await postToSheet("updateInvoice", { invoiceId, invoiceNo, amount, invoiceDate });
+      btn.textContent = result.success ? "Saved ✓" : "Failed — see banner above";
+      if (!result.success) { btn.disabled = false; return; }
+      state.editingInvoiceId = null;
+      await refreshData(); renderSuppliersTab(el, project);
+    });
+  });
+  el.querySelectorAll(".edit-payment-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.editingPaymentId = state.editingPaymentId === btn.dataset.id ? null : btn.dataset.id;
+      renderSuppliersTab(el, project);
+    });
+  });
+  el.querySelectorAll(".edit-payment-form").forEach((form) => {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = form.querySelector('button[type="submit"]');
+      if (btn.disabled) return;
+      btn.disabled = true; btn.textContent = "Saving…";
+      const paymentId = form.dataset.id;
+      const amount = form.querySelector(".ep-amount").value;
+      const paidDate = form.querySelector(".ep-date").value;
+      const result = await postToSheet("updatePayment", { paymentId, amount, paidDate });
+      btn.textContent = result.success ? "Saved ✓" : "Failed — see banner above";
+      if (!result.success) { btn.disabled = false; return; }
+      state.editingPaymentId = null;
       await refreshData(); renderSuppliersTab(el, project);
     });
   });
