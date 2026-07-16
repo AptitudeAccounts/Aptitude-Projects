@@ -5,7 +5,7 @@
    Paste your Apps Script Web App URL into SHEETS_API_URL below.
    ============================================================ */
 
-const SHEETS_API_URL = "https://script.google.com/macros/s/AKfycbzpCuePxK8Mi8l_l5QH8tRrvPRFmqe3TkxhQsz1RJduCgdjMTF5SE6nxxKivlzvTUt6/exec";
+const SHEETS_API_URL = "https://script.google.com/macros/s/AKfycbxLz3hmE3L0AhsWcXSwE6kliYaA_eRd4HVMac_TCBBkFmKWa_JKqbd8KH1-QOgwAxZX/exec";
 const USE_LIVE_DATA = true;
 
 function formatAED(n) {
@@ -1211,7 +1211,6 @@ function attachSupplierDetailHandlers(el, project) {
       btn.disabled = true; btn.textContent = "Saving…";
       const invoiceId = form.dataset.invoice;
       const amount = form.querySelector(".pay-amount").value, paidDate = form.querySelector(".pay-date").value;
-      alert("DEBUG — about to send this payment:\n\ninvoiceId: [" + invoiceId + "]\namount: [" + amount + "]\npaidDate: [" + paidDate + "]\n\nClick OK to continue.");
       const fileInput = form.querySelector(".pay-receipt");
       let fileBase64 = "", fileName = "", mimeType = "";
       if (fileInput.files[0]) {
