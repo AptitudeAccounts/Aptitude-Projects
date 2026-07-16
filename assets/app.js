@@ -20,6 +20,10 @@ function escapeHtml(str) {
   d.innerText = str == null ? "" : String(str);
   return d.innerHTML;
 }
+/** Never let a blank/missing field render as the literal word "undefined". */
+function safe(val, fallback) {
+  return val !== undefined && val !== null && String(val).trim() !== "" ? val : (fallback !== undefined ? fallback : "—");
+}
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -288,7 +292,13 @@ function computedProject(project) {
   const spent = m.spent > 0 ? m.spent : Number(project.spent || 0);
   const outstanding = m.suppliers.length > 0 ? m.outstanding : Number(project.outstanding || 0);
   const completion = budget > 0 && m.spent > 0 ? Math.min(100, Math.round((spent / budget) * 100)) : Number(project.completion || 0);
-  return { ...project, budget, spent, outstanding, completion };
+  return {
+    ...project, budget, spent, outstanding, completion,
+    name: safe(project.name, "(untitled project — check the Projects sheet)"),
+    brand: safe(project.brand, "—"), location: safe(project.location, "—"), city: safe(project.city, "—"),
+    manager: safe(project.manager, "Unassigned"), nextMilestone: safe(project.nextMilestone, "—"),
+    riskLevel: safe(project.riskLevel, "Low"), status: safe(project.status, "on-track"),
+  };
 }
 
 function renderDashboard(el) {
