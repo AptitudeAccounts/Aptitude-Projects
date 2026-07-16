@@ -1211,6 +1211,7 @@ function attachSupplierDetailHandlers(el, project) {
       btn.disabled = true; btn.textContent = "Saving…";
       const invoiceId = form.dataset.invoice;
       const amount = form.querySelector(".pay-amount").value, paidDate = form.querySelector(".pay-date").value;
+      console.log("DEBUG — about to record payment with:", { invoiceId, amount, paidDate });
       const fileInput = form.querySelector(".pay-receipt");
       let fileBase64 = "", fileName = "", mimeType = "";
       if (fileInput.files[0]) {
