@@ -150,7 +150,7 @@ async function fetchWithRetry_(url, options, retries = 3, timeoutMs = 30000) {
 async function loadAllData() {
   if (!USE_LIVE_DATA || !SHEETS_API_URL) return { ...MOCK_DATA };
   try {
-    const res = await fetchWithRetry_(SHEETS_API_URL, undefined, 3, 20000);
+    const res = await fetchWithRetry_(SHEETS_API_URL, undefined, 2, 12000);
     const data = await res.json();
     return {
       projects: data.projects || [], milestones: data.milestones || [], budgetCategories: data.budgetCategories || [],
@@ -165,8 +165,13 @@ async function loadAllData() {
 }
 async function postToSheet(action, payload) {
   if (!USE_LIVE_DATA || !SHEETS_API_URL) { console.log("(offline mode)", action, payload); return { success: true, offline: true }; }
+  // Actions with an attached file get more patience (uploads are inherently slower) but fewer retries (retrying a big upload 3x wastes time).
+  // Everything else gets a short timeout so the button gives you a clear answer within seconds, not minutes.
+  const hasFile = !!(payload && payload.fileBase64);
+  const timeoutMs = hasFile ? 40000 : 12000;
+  const retries = hasFile ? 1 : 2;
   try {
-    const res = await fetchWithRetry_(SHEETS_API_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action, ...payload }) }, 3, 45000);
+    const res = await fetchWithRetry_(SHEETS_API_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action, ...payload }) }, retries, timeoutMs);
     const result = await res.json();
     if (!result.success) {
       console.error("Save failed:", action, result.error);
@@ -175,7 +180,7 @@ async function postToSheet(action, payload) {
     return result;
   } catch (e) {
     console.error("Save failed after retrying:", e);
-    showBanner(`Couldn't reach the server to save that, even after several tries (${e.message || e}). This usually means the Apps Script deployment or connection needs attention.`, true);
+    showBanner(`Couldn't reach the server to save that, even after retrying (${e.message || e}). This usually means the Apps Script deployment or connection needs attention.`, true);
     return { success: false, error: String(e) };
   }
 }
@@ -635,7 +640,9 @@ function renderAddProjectForm(el) {
       outstanding: document.getElementById("np-outstanding").value || 0, openingDate: document.getElementById("np-opening").value,
       nextMilestone: document.getElementById("np-nextmilestone").value,
     };
-    await postToSheet("addProject", payload);
+    const result = await postToSheet("addProject", payload);
+    btn.textContent = result.success ? "Saved ✓" : "Failed — see banner above";
+    if (!result.success) { btn.disabled = false; return; }
     showAddProject = false;
     await refreshData();
     renderProjects(el);
@@ -731,7 +738,9 @@ function renderEditProjectForm(el, project) {
       riskLevel: document.getElementById("ep-risk").value, openingDate: document.getElementById("ep-opening").value,
       nextMilestone: document.getElementById("ep-nextmilestone").value,
     };
-    await postToSheet("updateProject", payload);
+    const result = await postToSheet("updateProject", payload);
+    btn.textContent = result.success ? "Saved ✓" : "Failed — see banner above";
+    if (!result.success) { btn.disabled = false; return; }
     showEditProject = false;
     await refreshData();
     renderWorkspace(el);
@@ -798,7 +807,8 @@ function renderOverviewTab(el, project, remaining) {
     const type = document.getElementById("remark-type").value;
     const tagged = Array.from(el.querySelectorAll(".tag-check:checked")).map((c) => c.value).join(", ");
     input.value = "";
-    await postToSheet("addRemark", { projectId: project.id, projectName: project.name, author: state.user.name, role: state.user.role, type, tagged, text });
+    const result = await postToSheet("addRemark", { projectId: project.id, projectName: project.name, author: state.user.name, role: state.user.role, type, tagged, text });
+    if (!result.success) { btn.disabled = false; btn.textContent = "Post"; input.value = text; return; }
     await refreshData();
     renderOverviewTab(el, computedProject(state.projects.find((p) => p.id === project.id)), remaining);
   });
@@ -863,7 +873,9 @@ function renderProgressTab(el, project) {
     btn.disabled = true; btn.textContent = "Saving…";
     const owner = document.getElementById("mile-owner").value.trim();
     const due = document.getElementById("mile-due").value;
-    await postToSheet("addMilestone", { projectId: project.id, name, owner, due });
+    const result = await postToSheet("addMilestone", { projectId: project.id, name, owner, due });
+    btn.textContent = result.success ? "Saved ✓" : "Failed — see banner above";
+    if (!result.success) { btn.disabled = false; return; }
     await refreshData(); renderProgressTab(el, project);
   });
   el.querySelectorAll(".delete-milestone").forEach((btn) => {
@@ -936,7 +948,9 @@ function renderBudgetTab(el, project) {
     if (btn.disabled) return;
     btn.disabled = true; btn.textContent = "Saving…";
     const budget = document.getElementById("cat-budget").value;
-    await postToSheet("addBudgetCategory", { projectId: project.id, name, budget });
+    const result = await postToSheet("addBudgetCategory", { projectId: project.id, name, budget });
+    btn.textContent = result.success ? "Saved ✓" : "Failed — see banner above";
+    if (!result.success) { btn.disabled = false; return; }
     await refreshData(); renderBudgetTab(el, project);
   });
   el.querySelectorAll(".save-budget").forEach((btn) => {
@@ -986,7 +1000,9 @@ function renderSuppliersTab(el, project) {
     btn.disabled = true; btn.textContent = "Saving…";
     const category = document.getElementById("sup-category").value.trim() || "Other";
     const contractValue = document.getElementById("sup-contract").value;
-    await postToSheet("addSupplier", { projectId: project.id, name, category, contractValue });
+    const result = await postToSheet("addSupplier", { projectId: project.id, name, category, contractValue });
+    btn.textContent = result.success ? "Saved ✓" : "Failed — see banner above";
+    if (!result.success) { btn.disabled = false; return; }
     await refreshData(); renderSuppliersTab(el, project);
   });
   renderSupplierList(el, project, suppliers);
@@ -1067,7 +1083,9 @@ function renderSupplierList(el, project, suppliers) {
       const name = form.querySelector(".es-name").value.trim();
       const category = form.querySelector(".es-category").value.trim();
       const contractValue = form.querySelector(".es-contract").value;
-      await postToSheet("updateSupplier", { supplierId, name, category, contractValue });
+      const result = await postToSheet("updateSupplier", { supplierId, name, category, contractValue });
+      btn.textContent = result.success ? "Saved ✓" : "Failed — see banner above";
+      if (!result.success) { btn.disabled = false; return; }
       state.editingSupplierId = null;
       await refreshData();
       renderSuppliersTab(el, project);
@@ -1124,7 +1142,9 @@ function attachSupplierDetailHandlers(el, project) {
         if (!checkFileSize_(fileInput.files[0])) { btn.disabled = false; btn.textContent = "Add Invoice"; return; }
         fileBase64 = await fileToBase64(fileInput.files[0]); fileName = fileInput.files[0].name; mimeType = fileInput.files[0].type;
       }
-      await postToSheet("addInvoice", { supplierId, invoiceNo, amount, invoiceDate, projectName: project.name, fileBase64, fileName, mimeType });
+      const result = await postToSheet("addInvoice", { supplierId, invoiceNo, amount, invoiceDate, projectName: project.name, fileBase64, fileName, mimeType });
+      btn.textContent = result.success ? "Saved ✓" : "Failed — see banner above";
+      if (!result.success) { btn.disabled = false; return; }
       await refreshData(); renderSuppliersTab(el, project);
     });
   });
@@ -1142,7 +1162,9 @@ function attachSupplierDetailHandlers(el, project) {
         if (!checkFileSize_(fileInput.files[0])) { btn.disabled = false; btn.textContent = "Record Payment"; return; }
         fileBase64 = await fileToBase64(fileInput.files[0]); fileName = fileInput.files[0].name; mimeType = fileInput.files[0].type;
       }
-      await postToSheet("addPayment", { invoiceId, amount, paidDate, projectName: project.name, fileBase64, fileName, mimeType });
+      const result = await postToSheet("addPayment", { invoiceId, amount, paidDate, projectName: project.name, fileBase64, fileName, mimeType });
+      btn.textContent = result.success ? "Saved ✓" : "Failed — see banner above";
+      if (!result.success) { btn.disabled = false; return; }
       await refreshData(); renderSuppliersTab(el, project);
     });
   });
@@ -1189,7 +1211,9 @@ function renderDocumentsTab(el, project) {
       if (!checkFileSize_(fileInput.files[0])) return;
       btn.disabled = true; btn.textContent = "Uploading…";
       const fileBase64 = await fileToBase64(fileInput.files[0]);
-      await postToSheet("uploadDocument", { projectId: project.id, projectName: project.name, folder: state.openFolder, fileName: fileInput.files[0].name, mimeType: fileInput.files[0].type, fileBase64, uploadedBy: state.user.name });
+      const result = await postToSheet("uploadDocument", { projectId: project.id, projectName: project.name, folder: state.openFolder, fileName: fileInput.files[0].name, mimeType: fileInput.files[0].type, fileBase64, uploadedBy: state.user.name });
+      btn.textContent = result.success ? "Saved ✓" : "Failed — see banner above";
+      if (!result.success) { btn.disabled = false; return; }
       await refreshData(); renderDocumentsTab(el, project);
     });
     el.querySelectorAll(".delete-doc-btn").forEach((btn) => {
