@@ -242,17 +242,70 @@ function render() {
   updateNotifBadge();
 }
 
-/* ---------------- Dashboard (with clickable, expandable KPI cards) ---------------- */
+/* ---------------- Computed metrics (auto-calculated from Budget/Suppliers/Payments) ---------------- */
+/**
+ * A project's Budget, Spent, Outstanding and Completion are no longer typed in manually —
+ * they're derived live from BudgetCategories, Suppliers, Invoices and Payments:
+ *   Budget      = sum of that project's Budget Category amounts (falls back to the Projects sheet value if none entered yet)
+ *   Spent       = sum of all Payments recorded against that project's suppliers
+ *   Outstanding = sum of (Contract Value - Paid) across that project's suppliers
+ *   Completion  = Spent ÷ Budget, capped at 100% (falls back to the Projects sheet value if Budget is 0)
+ */
+function getProjectMetrics(projectId) {
+  const categories = state.budgetCategories.filter((c) => c.project_id === projectId);
+  const suppliers = state.suppliers.filter((s) => s.project_id === projectId);
+
+  const categoryBudgetSum = categories.reduce((s, c) => s + Number(c.budget || 0), 0);
+
+  let spent = 0, outstanding = 0;
+  suppliers.forEach((s) => {
+    const invoices = state.invoices.filter((i) => i.supplier_id === s.id);
+    const paidForSupplier = invoices.reduce((sum, inv) => {
+      const pays = state.payments.filter((p) => p.invoice_id === inv.id);
+      return sum + pays.reduce((s2, p) => s2 + Number(p.amount || 0), 0);
+    }, 0);
+    spent += paidForSupplier;
+    outstanding += Math.max(0, Number(s.contract_value || 0) - paidForSupplier);
+  });
+
+  return { categoryBudgetSum, suppliers, spent, outstanding };
+}
+
+/** Merges a raw project row with its live-computed numbers for display. Original sheet row is untouched. */
+function computedProject(project) {
+  const m = getProjectMetrics(project.id);
+  const budget = m.categoryBudgetSum > 0 ? m.categoryBudgetSum : Number(project.budget || 0);
+  const spent = m.spent > 0 ? m.spent : Number(project.spent || 0);
+  const outstanding = m.suppliers.length > 0 ? m.outstanding : Number(project.outstanding || 0);
+  const completion = budget > 0 && m.spent > 0 ? Math.min(100, Math.round((spent / budget) * 100)) : Number(project.completion || 0);
+  return { ...project, budget, spent, outstanding, completion };
+}
+
 function renderDashboard(el) {
-  const p = state.projects;
+  const p = state.projects.map(computedProject);
   const totalBudget = p.reduce((s, x) => s + Number(x.budget || 0), 0);
   const totalSpent = p.reduce((s, x) => s + Number(x.spent || 0), 0);
   const totalOutstanding = p.reduce((s, x) => s + Number(x.outstanding || 0), 0);
   const active = p.filter((x) => x.status !== "completed");
   const completed = p.filter((x) => x.status === "completed");
   const recentRemarks = [...state.remarks].reverse().slice(0, 5);
+  const nextOpening = [...p].filter((x) => x.status !== "completed").sort((a, b) => String(a.openingDate).localeCompare(String(b.openingDate)))[0];
+  const now = new Date();
+  const greeting = now.getHours() < 12 ? "Good morning" : now.getHours() < 17 ? "Good afternoon" : "Good evening";
 
   el.innerHTML = `
+    <div class="hero-banner">
+      <div class="hero-inner">
+        <div>
+          <h1>${greeting}, ${state.user.name} 👋</h1>
+          <p>${now.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })} · ${p.length} projects across the portfolio</p>
+        </div>
+        <div class="hero-stat">
+          <p class="val">${nextOpening ? nextOpening.name : "—"}</p>
+          <p class="lbl">Next Opening${nextOpening ? " · " + formatDate(nextOpening.openingDate) : ""}</p>
+        </div>
+      </div>
+    </div>
     <div class="grid kpi-grid">
       ${kpiClickable("active", "Active Projects", active.length, "graphite")}
       ${kpiClickable("completed", "Completed", completed.length, "good")}
@@ -342,7 +395,7 @@ let activeFilter = "all";
 let showAddProject = false;
 function renderProjects(el) {
   const filters = [["all", "All"], ["on-track", "On Track"], ["attention", "Attention"], ["delayed", "Delayed"], ["completed", "Completed"]];
-  const list = activeFilter === "all" ? state.projects : state.projects.filter((p) => p.status === activeFilter);
+  const list = (activeFilter === "all" ? state.projects : state.projects.filter((p) => p.status === activeFilter)).map(computedProject);
   el.innerHTML = `
     <div class="section-card-header">
       <div class="filters">${filters.map(([v, l]) => `<button class="filter-btn ${activeFilter === v ? "active" : ""}" data-filter="${v}">${l}</button>`).join("")}</div>
@@ -414,9 +467,11 @@ function renderAddProjectForm(el) {
 }
 
 /* ---------------- Project workspace ---------------- */
+let showEditProject = false;
 function renderWorkspace(el) {
-  const project = state.projects.find((p) => p.id === state.projectId) || state.projects[0];
-  if (!project) { el.innerHTML = `<p class="loading-note">No project data yet.</p>`; return; }
+  const rawProject = state.projects.find((p) => p.id === state.projectId) || state.projects[0];
+  if (!rawProject) { el.innerHTML = `<p class="loading-note">No project data yet.</p>`; return; }
+  const project = computedProject(rawProject);
   const remaining = Number(project.budget) - Number(project.spent);
   const tabs = ["Overview", "Progress", "Budget", "Suppliers", "Documents", "Full Report"];
   el.innerHTML = `
@@ -424,11 +479,15 @@ function renderWorkspace(el) {
     <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:0.75rem;margin-top:0.3rem;">
       <div><div style="display:flex;align-items:center;gap:0.6rem;"><h1 style="font-size:1.3rem;">${project.name}</h1>${badge(project.status)}</div>
       <p style="color:var(--graphite-500);font-size:0.85rem;margin-top:0.3rem;">📍 ${project.location}, ${project.city} · ${project.brand}</p></div>
+      <button class="filter-btn" id="toggle-edit-project">✏️ Edit Project</button>
     </div>
+    <div id="edit-project-wrap"></div>
     <div class="tabs">${tabs.map((t) => `<button class="tab-btn ${state.workspaceTab === t ? "active" : ""}" data-tab="${t}">${t}</button>`).join("")}</div>
     <div id="tab-content" style="margin-top:1.5rem;"></div>`;
   document.getElementById("crumb-projects").addEventListener("click", (e) => { e.preventDefault(); navigate("projects"); });
   el.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => { state.workspaceTab = b.dataset.tab; state.openFolder = null; state.openSupplierId = null; renderWorkspace(el); }));
+  document.getElementById("toggle-edit-project").addEventListener("click", () => { showEditProject = !showEditProject; renderEditProjectForm(el, rawProject); });
+  renderEditProjectForm(el, rawProject);
 
   const tabEl = document.getElementById("tab-content");
   if (state.workspaceTab === "Overview") renderOverviewTab(tabEl, project, remaining);
@@ -437,6 +496,57 @@ function renderWorkspace(el) {
   if (state.workspaceTab === "Suppliers") renderSuppliersTab(tabEl, project);
   if (state.workspaceTab === "Documents") renderDocumentsTab(tabEl, project);
   if (state.workspaceTab === "Full Report") renderFullReportTab(tabEl, project, remaining);
+}
+
+function renderEditProjectForm(el, project) {
+  const wrap = document.getElementById("edit-project-wrap");
+  if (!showEditProject) { wrap.innerHTML = ""; return; }
+  wrap.innerHTML = `
+    <form id="edit-project-form" class="collapsible-form">
+      <p style="font-size:0.78rem;color:var(--graphite-500);margin-bottom:0.6rem;">Budget, Spent, Outstanding and Completion are auto-calculated from Budget Categories, Suppliers and Payments — edit those instead. Everything else here can be changed directly.</p>
+      <div class="field-row">
+        <input required id="ep-name" placeholder="Project name" value="${escapeHtml(project.name)}" style="flex:2;min-width:180px;" />
+        <input required id="ep-brand" placeholder="Brand" value="${escapeHtml(project.brand)}" style="flex:1;min-width:140px;" />
+      </div>
+      <div class="field-row">
+        <input required id="ep-location" placeholder="Location" value="${escapeHtml(project.location)}" style="flex:1;min-width:160px;" />
+        <input required id="ep-city" placeholder="City" value="${escapeHtml(project.city)}" style="width:140px;" />
+        <input required id="ep-manager" placeholder="Project Manager" value="${escapeHtml(project.manager)}" style="flex:1;min-width:160px;" />
+      </div>
+      <div class="field-row">
+        <select id="ep-status">
+          <option value="on-track" ${project.status === "on-track" ? "selected" : ""}>On Track</option>
+          <option value="attention" ${project.status === "attention" ? "selected" : ""}>Attention</option>
+          <option value="delayed" ${project.status === "delayed" ? "selected" : ""}>Delayed</option>
+          <option value="completed" ${project.status === "completed" ? "selected" : ""}>Completed</option>
+        </select>
+        <select id="ep-risk">
+          <option value="Low" ${project.riskLevel === "Low" ? "selected" : ""}>Low Risk</option>
+          <option value="Medium" ${project.riskLevel === "Medium" ? "selected" : ""}>Medium Risk</option>
+          <option value="High" ${project.riskLevel === "High" ? "selected" : ""}>High Risk</option>
+        </select>
+        <input required id="ep-opening" type="date" value="${project.openingDate ? String(project.openingDate).slice(0, 10) : ""}" style="width:160px;" />
+      </div>
+      <div class="field-row">
+        <input id="ep-nextmilestone" placeholder="Next milestone" value="${escapeHtml(project.nextMilestone)}" style="flex:1;min-width:200px;" />
+        <button type="submit" class="login-submit" style="width:auto;padding:0.5rem 1.1rem;margin:0;">Save Changes</button>
+      </div>
+    </form>`;
+  document.getElementById("edit-project-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const payload = {
+      projectId: project.id,
+      name: document.getElementById("ep-name").value, brand: document.getElementById("ep-brand").value,
+      location: document.getElementById("ep-location").value, city: document.getElementById("ep-city").value,
+      manager: document.getElementById("ep-manager").value, status: document.getElementById("ep-status").value,
+      riskLevel: document.getElementById("ep-risk").value, openingDate: document.getElementById("ep-opening").value,
+      nextMilestone: document.getElementById("ep-nextmilestone").value,
+    };
+    await postToSheet("updateProject", payload);
+    showEditProject = false;
+    await refreshData();
+    renderWorkspace(el);
+  });
 }
 
 /* ---------- Overview + Remarks (type + tagging) ---------- */
@@ -540,6 +650,8 @@ function renderProgressTab(el, project) {
 }
 
 /* ---------- Budget tab — everyone logged in can edit ---------- */
+const BUDGET_CATEGORY_PRESETS = ["Designer Contract", "Outfit Contract", "Equipment Contract", "Printing and Related"];
+
 function renderBudgetTab(el, project) {
   const list = state.budgetCategories.filter((c) => c.project_id === project.id);
   const totalBudget = list.reduce((s, c) => s + Number(c.budget || 0), 0);
@@ -554,12 +666,37 @@ function renderBudgetTab(el, project) {
       <td class="right"><span class="pct-pill" style="${pctStyle}">${pct}%</span></td>
       <td class="right"><button class="filter-btn save-budget" style="padding:0.25rem 0.6rem;">Save</button></td></tr>`;
   }).join("");
-  el.innerHTML = `<div class="card" style="padding:0;overflow-x:auto;">
-    <h2 style="font-size:1rem;padding:1.1rem 1.2rem;border-bottom:1px solid var(--graphite-100);">Budget vs Actual</h2>
-    <table><thead><tr><th>Category</th><th class="right">Budget</th><th class="right">Actual</th><th class="right">Variance</th><th class="right">Spent %</th><th></th></tr></thead>
-      <tbody>${rows}</tbody>
-      <tfoot><tr><td>Total</td><td class="right mono">${formatAED(totalBudget)}</td><td class="right mono">${formatAED(totalActual)}</td><td class="right mono">${formatAED(totalBudget - totalActual)}</td><td class="right mono">${totalBudget ? Math.round((totalActual / totalBudget) * 100) : 0}%</td><td></td></tr></tfoot>
-    </table></div>`;
+
+  el.innerHTML = `
+    <div class="card" style="margin-bottom:1rem;">
+      <h2 style="font-size:1rem;margin-bottom:0.5rem;">Add Budget Category</h2>
+      <p style="font-size:0.78rem;color:var(--graphite-500);margin-bottom:0.7rem;">This project's Total Budget on the Dashboard is the sum of every category below — add one for each contract or cost line.</p>
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.6rem;">
+        ${BUDGET_CATEGORY_PRESETS.map((name) => `<button type="button" class="filter-btn preset-cat-btn" data-preset="${name}" style="padding:0.35rem 0.7rem;">+ ${name}</button>`).join("")}
+      </div>
+      <form id="add-category-form" style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+        <input required id="cat-name" placeholder="Category name" style="flex:1;min-width:180px;border:1px solid var(--graphite-200);border-radius:0.5rem;padding:0.5rem 0.7rem;font-size:0.85rem;" />
+        <input required id="cat-budget" type="number" placeholder="Budget amount (AED)" style="width:180px;border:1px solid var(--graphite-200);border-radius:0.5rem;padding:0.5rem 0.7rem;font-size:0.85rem;" />
+        <button type="submit" class="login-submit" style="width:auto;padding:0.5rem 1.1rem;margin:0;">Add Category</button>
+      </form>
+    </div>
+    <div class="card" style="padding:0;overflow-x:auto;">
+      <h2 style="font-size:1rem;padding:1.1rem 1.2rem;border-bottom:1px solid var(--graphite-100);">Budget vs Actual</h2>
+      <table><thead><tr><th>Category</th><th class="right">Budget</th><th class="right">Actual</th><th class="right">Variance</th><th class="right">Spent %</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr><td>Total</td><td class="right mono">${formatAED(totalBudget)}</td><td class="right mono">${formatAED(totalActual)}</td><td class="right mono">${formatAED(totalBudget - totalActual)}</td><td class="right mono">${totalBudget ? Math.round((totalActual / totalBudget) * 100) : 0}%</td><td></td></tr></tfoot>
+      </table>
+    </div>`;
+
+  el.querySelectorAll(".preset-cat-btn").forEach((b) => b.addEventListener("click", () => { document.getElementById("cat-name").value = b.dataset.preset; }));
+  document.getElementById("add-category-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = document.getElementById("cat-name").value.trim();
+    const budget = document.getElementById("cat-budget").value;
+    if (!name) return;
+    await postToSheet("addBudgetCategory", { projectId: project.id, name, budget });
+    await refreshData(); renderBudgetTab(el, project);
+  });
   el.querySelectorAll(".save-budget").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const row = btn.closest("[data-cid]"); const cid = row.dataset.cid;
@@ -576,21 +713,24 @@ function renderBudgetTab(el, project) {
 /* ---------- Suppliers tab — Statement of Account per supplier ---------- */
 function renderSuppliersTab(el, project) {
   const suppliers = state.suppliers.filter((s) => s.project_id === project.id);
+  const categoryNames = state.budgetCategories.filter((c) => c.project_id === project.id).map((c) => c.name);
   el.innerHTML = `
     <div class="card" style="margin-bottom:1rem;">
       <h2 style="font-size:1rem;margin-bottom:0.8rem;">Add Supplier</h2>
       <form id="add-supplier-form" style="display:flex;gap:0.5rem;flex-wrap:wrap;">
         <input required id="sup-name" placeholder="Supplier name" style="flex:1;min-width:160px;border:1px solid var(--graphite-200);border-radius:0.5rem;padding:0.5rem 0.7rem;font-size:0.85rem;" />
-        <input required id="sup-category" placeholder="Category (e.g. Fit-Out)" style="flex:1;min-width:140px;border:1px solid var(--graphite-200);border-radius:0.5rem;padding:0.5rem 0.7rem;font-size:0.85rem;" />
+        <input required id="sup-category" list="category-options" placeholder="Category (matches a Budget Category)" style="flex:1;min-width:200px;border:1px solid var(--graphite-200);border-radius:0.5rem;padding:0.5rem 0.7rem;font-size:0.85rem;" />
+        <datalist id="category-options">${categoryNames.map((n) => `<option value="${escapeHtml(n)}">`).join("")}</datalist>
         <input required id="sup-contract" type="number" placeholder="Contract value (AED)" style="width:160px;border:1px solid var(--graphite-200);border-radius:0.5rem;padding:0.5rem 0.7rem;font-size:0.85rem;" />
         <button type="submit" class="login-submit" style="width:auto;padding:0.5rem 1.1rem;margin:0;">Add</button>
       </form>
+      <p style="font-size:0.75rem;color:var(--graphite-400);margin-top:0.5rem;">Type a category that matches one on the Budget tab (e.g. "Outfit Contract") to group this supplier under it below.</p>
     </div>
-    <div id="supplier-list" class="grid" style="grid-template-columns:1fr;gap:1rem;"></div>`;
+    <div id="supplier-list"></div>`;
   document.getElementById("add-supplier-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const name = document.getElementById("sup-name").value.trim();
-    const category = document.getElementById("sup-category").value.trim();
+    const category = document.getElementById("sup-category").value.trim() || "Other";
     const contractValue = document.getElementById("sup-contract").value;
     if (!name) return;
     await postToSheet("addSupplier", { projectId: project.id, name, category, contractValue });
@@ -600,27 +740,41 @@ function renderSuppliersTab(el, project) {
 }
 function renderSupplierList(el, project, suppliers) {
   const listEl = document.getElementById("supplier-list");
-  listEl.innerHTML = suppliers.length === 0 ? `<p style="font-size:0.85rem;color:var(--graphite-400);">No suppliers added yet.</p>` :
-    suppliers.map((s) => {
-      const invoices = state.invoices.filter((i) => i.supplier_id === s.id);
-      const invoiceTotal = invoices.reduce((sum, i) => sum + Number(i.amount || 0), 0);
-      const paidTotal = invoices.reduce((sum, i) => { const pays = state.payments.filter((p) => p.invoice_id === i.id); return sum + pays.reduce((s2, p) => s2 + Number(p.amount || 0), 0); }, 0);
-      const balance = Number(s.contract_value || 0) - paidTotal;
-      const isOpen = state.openSupplierId === s.id;
-      return `<div class="card supplier-card">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;cursor:pointer;" data-toggle-supplier="${s.id}">
-          <div><h3 style="font-size:1rem;">${s.name} ${isOpen ? "▾" : "▸"}</h3><p style="font-size:0.78rem;color:var(--graphite-500);">${s.category}</p></div>
-          <span class="pct-pill" style="${balance > 0 ? "background:var(--warn-bg);color:var(--warn);" : "background:var(--good-bg);color:var(--good);"}">${balance > 0 ? "Balance Due" : "Settled"}</span>
-        </div>
-        <div class="stat-grid">
-          <div><p style="font-size:0.7rem;color:var(--graphite-400);">Contract Amount</p><p class="mono" style="font-size:0.85rem;font-weight:600;">${formatAED(s.contract_value)}</p></div>
-          <div><p style="font-size:0.7rem;color:var(--graphite-400);">Invoiced</p><p class="mono" style="font-size:0.85rem;font-weight:600;">${formatAED(invoiceTotal)}</p></div>
-          <div><p style="font-size:0.7rem;color:var(--graphite-400);">Payment Done</p><p class="mono" style="font-size:0.85rem;font-weight:600;">${formatAED(paidTotal)}</p></div>
-          <div><p style="font-size:0.7rem;color:var(--graphite-400);">Balance Yet to Pay</p><p class="mono" style="font-size:0.85rem;font-weight:600;color:var(--bad);">${formatAED(balance)}</p></div>
-        </div>
-        ${isOpen ? renderSupplierDetail(project, s, invoices) : ""}
-      </div>`;
-    }).join("");
+  if (suppliers.length === 0) { listEl.innerHTML = `<p style="font-size:0.85rem;color:var(--graphite-400);">No suppliers added yet.</p>`; return; }
+
+  // Group suppliers by category so this reads as a per-category spend report.
+  const groups = {};
+  suppliers.forEach((s) => { const key = s.category || "Other"; (groups[key] = groups[key] || []).push(s); });
+
+  listEl.innerHTML = Object.keys(groups).map((catName) => {
+    const catSuppliers = groups[catName];
+    return `<div style="margin-bottom:1.4rem;">
+      <h3 style="font-size:0.9rem;color:var(--brass-600);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:0.6rem;">${escapeHtml(catName)}</h3>
+      <div class="grid" style="grid-template-columns:1fr;gap:1rem;">
+        ${catSuppliers.map((s) => {
+          const invoices = state.invoices.filter((i) => i.supplier_id === s.id);
+          const invoiceTotal = invoices.reduce((sum, i) => sum + Number(i.amount || 0), 0);
+          const paidTotal = invoices.reduce((sum, i) => { const pays = state.payments.filter((p) => p.invoice_id === i.id); return sum + pays.reduce((s2, p) => s2 + Number(p.amount || 0), 0); }, 0);
+          const balance = Number(s.contract_value || 0) - paidTotal;
+          const isOpen = state.openSupplierId === s.id;
+          return `<div class="card supplier-card">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;cursor:pointer;" data-toggle-supplier="${s.id}">
+              <div><h3 style="font-size:1rem;">${s.name} ${isOpen ? "▾" : "▸"}</h3><p style="font-size:0.78rem;color:var(--graphite-500);">${s.category}</p></div>
+              <span class="pct-pill" style="${balance > 0 ? "background:var(--warn-bg);color:var(--warn);" : "background:var(--good-bg);color:var(--good);"}">${balance > 0 ? "Balance Due" : "Settled"}</span>
+            </div>
+            <div class="stat-grid">
+              <div><p style="font-size:0.7rem;color:var(--graphite-400);">Contract Amount</p><p class="mono" style="font-size:0.85rem;font-weight:600;">${formatAED(s.contract_value)}</p></div>
+              <div><p style="font-size:0.7rem;color:var(--graphite-400);">Invoiced</p><p class="mono" style="font-size:0.85rem;font-weight:600;">${formatAED(invoiceTotal)}</p></div>
+              <div><p style="font-size:0.7rem;color:var(--graphite-400);">Payment Done</p><p class="mono" style="font-size:0.85rem;font-weight:600;">${formatAED(paidTotal)}</p></div>
+              <div><p style="font-size:0.7rem;color:var(--graphite-400);">Balance Yet to Pay</p><p class="mono" style="font-size:0.85rem;font-weight:600;color:var(--bad);">${formatAED(balance)}</p></div>
+            </div>
+            ${isOpen ? renderSupplierDetail(project, s, invoices) : ""}
+          </div>`;
+        }).join("")}
+      </div>
+    </div>`;
+  }).join("");
+
   listEl.querySelectorAll("[data-toggle-supplier]").forEach((row) => {
     row.addEventListener("click", () => { state.openSupplierId = state.openSupplierId === row.dataset.toggleSupplier ? null : row.dataset.toggleSupplier; renderSupplierList(el, project, suppliers); attachSupplierDetailHandlers(el, project); });
   });
