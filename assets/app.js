@@ -499,7 +499,10 @@ function renderWorkspace(el) {
     <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:0.75rem;margin-top:0.3rem;">
       <div><div style="display:flex;align-items:center;gap:0.6rem;"><h1 style="font-size:1.3rem;">${project.name}</h1>${badge(project.status)}</div>
       <p style="color:var(--graphite-500);font-size:0.85rem;margin-top:0.3rem;">📍 ${project.location}, ${project.city} · ${project.brand}</p></div>
-      <button class="filter-btn" id="toggle-edit-project">✏️ Edit Project</button>
+      <div style="display:flex;gap:0.5rem;">
+        <button class="filter-btn" id="toggle-edit-project">✏️ Edit Project</button>
+        <button class="filter-btn" id="delete-project-btn" style="color:var(--bad);">🗑️ Delete Project</button>
+      </div>
     </div>
     <div id="edit-project-wrap"></div>
     <div class="tabs">${tabs.map((t) => `<button class="tab-btn ${state.workspaceTab === t ? "active" : ""}" data-tab="${t}">${t}</button>`).join("")}</div>
@@ -507,6 +510,13 @@ function renderWorkspace(el) {
   document.getElementById("crumb-projects").addEventListener("click", (e) => { e.preventDefault(); navigate("projects"); });
   el.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => { state.workspaceTab = b.dataset.tab; state.openFolder = null; state.openSupplierId = null; state.editingSupplierId = null; renderWorkspace(el); }));
   document.getElementById("toggle-edit-project").addEventListener("click", () => { showEditProject = !showEditProject; renderEditProjectForm(el, rawProject); });
+  document.getElementById("delete-project-btn").addEventListener("click", async () => {
+    const typed = prompt(`This permanently deletes "${project.name}" AND every milestone, budget category, supplier, invoice, payment, remark and document under it.\n\nType the project name exactly to confirm:`);
+    if (typed !== project.name) { if (typed !== null) alert("Name didn't match — nothing was deleted."); return; }
+    await postToSheet("deleteProject", { projectId: project.id });
+    await refreshData();
+    navigate("projects");
+  });
   renderEditProjectForm(el, rawProject);
 
   const tabEl = document.getElementById("tab-content");
@@ -600,8 +610,11 @@ function renderOverviewTab(el, project, remaining) {
           <div id="remarks-list" style="margin-top:1rem;">
             ${projectRemarks.length === 0 ? `<p style="font-size:0.82rem;color:var(--graphite-400);">No remarks yet.</p>` :
               projectRemarks.map((r) => `
-                <div style="border-bottom:1px solid var(--graphite-50);padding:0.6rem 0;">
-                  <div style="display:flex;gap:0.5rem;align-items:baseline;"><span class="pct-pill" style="${typeStyle(r.type)}">${(r.type || "remark").toUpperCase()}</span><p style="font-size:0.85rem;margin:0;">${escapeHtml(r.text)}</p></div>
+                <div class="remark-row" data-remark-id="${r.id}" style="border-bottom:1px solid var(--graphite-50);padding:0.6rem 0;">
+                  <div style="display:flex;gap:0.5rem;align-items:baseline;justify-content:space-between;">
+                    <div style="display:flex;gap:0.5rem;align-items:baseline;"><span class="pct-pill" style="${typeStyle(r.type)}">${(r.type || "remark").toUpperCase()}</span><p style="font-size:0.85rem;margin:0;">${escapeHtml(r.text)}</p></div>
+                    <button class="filter-btn delete-remark-btn" style="padding:0.1rem 0.4rem;color:var(--bad);font-size:0.7rem;">🗑️</button>
+                  </div>
                   <p style="font-size:0.72rem;color:var(--graphite-400);margin:3px 0 0;">${r.author} (${r.role}) · ${new Date(r.timestamp).toLocaleString()} ${r.tagged ? "· tagged " + escapeHtml(r.tagged) : ""}</p>
                 </div>`).join("")}
           </div>
@@ -622,10 +635,19 @@ function renderOverviewTab(el, project, remaining) {
     const text = input.value.trim(); if (!text) return;
     const type = document.getElementById("remark-type").value;
     const tagged = Array.from(el.querySelectorAll(".tag-check:checked")).map((c) => c.value).join(", ");
-    const remark = { id: "local-" + Date.now(), project_id: project.id, author: state.user.name, role: state.user.role, type, tagged, text, timestamp: new Date().toISOString() };
-    state.remarks.push(remark); input.value = "";
-    renderOverviewTab(el, project, remaining);
+    input.value = "";
     await postToSheet("addRemark", { projectId: project.id, projectName: project.name, author: state.user.name, role: state.user.role, type, tagged, text });
+    await refreshData();
+    renderOverviewTab(el, computedProject(state.projects.find((p) => p.id === project.id)), remaining);
+  });
+  el.querySelectorAll(".delete-remark-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("Delete this remark? This can't be undone.")) return;
+      const remarkId = btn.closest("[data-remark-id]").dataset.remarkId;
+      await postToSheet("deleteRemark", { remarkId });
+      await refreshData();
+      renderOverviewTab(el, computedProject(state.projects.find((p) => p.id === project.id)), remaining);
+    });
   });
 }
 function field(label, value) { return `<div><p style="font-size:0.72rem;color:var(--graphite-400);">${label}</p><p style="font-size:0.85rem;font-weight:500;margin-top:0.2rem;">${value}</p></div>`; }
@@ -664,6 +686,7 @@ function renderProgressTab(el, project) {
               <input class="m-progress" type="number" min="0" max="100" value="${m.progress || 0}" style="width:60px;border:1px solid var(--graphite-200);border-radius:0.4rem;padding:0.25rem 0.4rem;font-size:0.8rem;" />
               <input class="m-remarks" type="text" placeholder="Notes…" value="${escapeHtml(m.remarks || "")}" style="width:140px;border:1px solid var(--graphite-200);border-radius:0.4rem;padding:0.25rem 0.5rem;font-size:0.8rem;" />
               <button class="filter-btn save-milestone" style="padding:0.3rem 0.7rem;">Save</button>
+              <button class="filter-btn delete-milestone" style="padding:0.3rem 0.6rem;color:var(--bad);">🗑️</button>
             </div>
           </div>`).join("")}
       </div>
@@ -677,6 +700,14 @@ function renderProgressTab(el, project) {
     if (!name) return;
     await postToSheet("addMilestone", { projectId: project.id, name, owner, due });
     await refreshData(); renderProgressTab(el, project);
+  });
+  el.querySelectorAll(".delete-milestone").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const mid = btn.closest("[data-mid]").dataset.mid;
+      if (!confirm("Delete this milestone? This can't be undone.")) return;
+      await postToSheet("deleteMilestone", { milestoneId: mid });
+      await refreshData(); renderProgressTab(el, project);
+    });
   });
   el.querySelectorAll(".save-milestone").forEach((btn) => {
     btn.addEventListener("click", async () => {
@@ -706,7 +737,8 @@ function renderBudgetTab(el, project) {
       <td class="right mono"><input class="c-actual" type="number" value="${c.actual}" style="width:110px;text-align:right;border:1px solid var(--graphite-200);border-radius:0.4rem;padding:0.25rem 0.4rem;font-size:0.82rem;" /></td>
       <td class="right mono" style="color:${variance < 0 ? "var(--bad)" : "var(--good)"}">${formatAED(variance)}</td>
       <td class="right"><span class="pct-pill" style="${pctStyle}">${pct}%</span></td>
-      <td class="right"><button class="filter-btn save-budget" style="padding:0.25rem 0.6rem;">Save</button></td></tr>`;
+      <td class="right"><button class="filter-btn save-budget" style="padding:0.25rem 0.6rem;">Save</button></td>
+      <td class="right"><button class="filter-btn delete-budget" style="padding:0.25rem 0.5rem;color:var(--bad);">🗑️</button></td></tr>`;
   }).join("");
 
   el.innerHTML = `
@@ -724,9 +756,9 @@ function renderBudgetTab(el, project) {
     </div>
     <div class="card" style="padding:0;overflow-x:auto;">
       <h2 style="font-size:1rem;padding:1.1rem 1.2rem;border-bottom:1px solid var(--graphite-100);">Budget vs Actual</h2>
-      <table><thead><tr><th>Category</th><th class="right">Budget</th><th class="right">Actual</th><th class="right">Variance</th><th class="right">Spent %</th><th></th></tr></thead>
+      <table><thead><tr><th>Category</th><th class="right">Budget</th><th class="right">Actual</th><th class="right">Variance</th><th class="right">Spent %</th><th></th><th></th></tr></thead>
         <tbody>${rows}</tbody>
-        <tfoot><tr><td>Total</td><td class="right mono">${formatAED(totalBudget)}</td><td class="right mono">${formatAED(totalActual)}</td><td class="right mono">${formatAED(totalBudget - totalActual)}</td><td class="right mono">${totalBudget ? Math.round((totalActual / totalBudget) * 100) : 0}%</td><td></td></tr></tfoot>
+        <tfoot><tr><td>Total</td><td class="right mono">${formatAED(totalBudget)}</td><td class="right mono">${formatAED(totalActual)}</td><td class="right mono">${formatAED(totalBudget - totalActual)}</td><td class="right mono">${totalBudget ? Math.round((totalActual / totalBudget) * 100) : 0}%</td><td></td><td></td></tr></tfoot>
       </table>
     </div>`;
 
@@ -748,6 +780,14 @@ function renderBudgetTab(el, project) {
       const result = await postToSheet("updateBudget", { categoryId: cid, actual });
       btn.textContent = result.success ? "Saved ✓" : "Failed";
       setTimeout(() => renderBudgetTab(el, project), 600);
+    });
+  });
+  el.querySelectorAll(".delete-budget").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const cid = btn.closest("[data-cid]").dataset.cid;
+      if (!confirm("Delete this budget category? This can't be undone.")) return;
+      await postToSheet("deleteBudgetCategory", { categoryId: cid });
+      await refreshData(); renderBudgetTab(el, project);
     });
   });
 }
@@ -809,6 +849,7 @@ function renderSupplierList(el, project, suppliers) {
               <div style="display:flex;align-items:center;gap:0.5rem;">
                 <span class="pct-pill" style="${balance > 0 ? "background:var(--warn-bg);color:var(--warn);" : "background:var(--good-bg);color:var(--good);"}">${balance > 0 ? "Balance Due" : "Settled"}</span>
                 <button class="filter-btn edit-supplier-btn" data-id="${s.id}" style="padding:0.2rem 0.5rem;">${isEditing ? "✕" : "✏️"}</button>
+                <button class="filter-btn delete-supplier-btn" data-id="${s.id}" style="padding:0.2rem 0.5rem;color:var(--bad);">🗑️</button>
               </div>
             </div>
             ${isEditing ? `
@@ -835,7 +876,15 @@ function renderSupplierList(el, project, suppliers) {
     row.addEventListener("click", () => { state.openSupplierId = state.openSupplierId === row.dataset.toggleSupplier ? null : row.dataset.toggleSupplier; renderSupplierList(el, project, suppliers); attachSupplierDetailHandlers(el, project); });
   });
   listEl.querySelectorAll(".edit-supplier-btn").forEach((btn) => {
-    btn.addEventListener("click", () => { state.editingSupplierId = state.editingSupplierId === btn.dataset.id ? null : btn.dataset.id; renderSupplierList(el, project, suppliers); attachSupplierDetailHandlers(el, project); });
+    btn.addEventListener("click", (e) => { e.stopPropagation(); state.editingSupplierId = state.editingSupplierId === btn.dataset.id ? null : btn.dataset.id; renderSupplierList(el, project, suppliers); attachSupplierDetailHandlers(el, project); });
+  });
+  listEl.querySelectorAll(".delete-supplier-btn").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (!confirm("Delete this supplier along with ALL its invoices and payments? This can't be undone.")) return;
+      await postToSheet("deleteSupplier", { supplierId: btn.dataset.id });
+      await refreshData(); renderSuppliersTab(el, project);
+    });
   });
   listEl.querySelectorAll(".edit-supplier-form").forEach((form) => {
     form.addEventListener("submit", async (e) => {
@@ -862,10 +911,13 @@ function renderSupplierDetail(project, supplier, invoices) {
         return `<div style="border:1px solid var(--graphite-100);border-radius:0.6rem;padding:0.7rem;margin-bottom:0.6rem;">
           <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:0.4rem;">
             <p style="font-size:0.85rem;font-weight:600;margin:0;">Invoice ${escapeHtml(inv.invoice_no)} — ${formatAED(inv.amount)}</p>
-            <p style="font-size:0.75rem;color:var(--graphite-500);margin:0;">${formatDate(inv.invoice_date)} ${inv.file_url ? `· <a href="${inv.file_url}" target="_blank" style="color:var(--brass-600);">View invoice</a>` : ""}</p>
+            <div style="display:flex;align-items:center;gap:0.5rem;">
+              <p style="font-size:0.75rem;color:var(--graphite-500);margin:0;">${formatDate(inv.invoice_date)} ${inv.file_url ? `· <a href="${inv.file_url}" target="_blank" style="color:var(--brass-600);">View invoice</a>` : ""}</p>
+              <button class="filter-btn delete-invoice-btn" data-id="${inv.id}" style="padding:0.15rem 0.4rem;color:var(--bad);font-size:0.7rem;">🗑️</button>
+            </div>
           </div>
           <p style="font-size:0.78rem;color:var(--graphite-500);margin:0.3rem 0 0;">Paid: <b class="mono">${formatAED(paid)}</b> · Balance: <b class="mono">${formatAED(Number(inv.amount) - paid)}</b></p>
-          ${pays.map((p) => `<p style="font-size:0.75rem;color:var(--graphite-600);margin:0.2rem 0 0;">💳 ${formatAED(p.amount)} on ${formatDate(p.paid_date)} ${p.receipt_url ? `· <a href="${p.receipt_url}" target="_blank" style="color:var(--brass-600);">Bank receipt</a>` : "(no receipt attached)"}</p>`).join("")}
+          ${pays.map((p) => `<p style="font-size:0.75rem;color:var(--graphite-600);margin:0.2rem 0 0;display:flex;align-items:center;gap:0.4rem;">💳 ${formatAED(p.amount)} on ${formatDate(p.paid_date)} ${p.receipt_url ? `· <a href="${p.receipt_url}" target="_blank" style="color:var(--brass-600);">Bank receipt</a>` : "(no receipt attached)"} <button class="filter-btn delete-payment-btn" data-id="${p.id}" style="padding:0.1rem 0.35rem;color:var(--bad);font-size:0.68rem;">🗑️</button></p>`).join("")}
           <form class="add-payment-form" data-invoice="${inv.id}" style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.5rem;">
             <input type="number" class="pay-amount" placeholder="Amount paid" required style="width:120px;border:1px solid var(--graphite-200);border-radius:0.4rem;padding:0.3rem 0.5rem;font-size:0.78rem;" />
             <input type="date" class="pay-date" required style="border:1px solid var(--graphite-200);border-radius:0.4rem;padding:0.3rem 0.5rem;font-size:0.78rem;" />
@@ -910,6 +962,20 @@ function attachSupplierDetailHandlers(el, project) {
       await refreshData(); renderSuppliersTab(el, project);
     });
   });
+  el.querySelectorAll(".delete-invoice-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("Delete this invoice along with any payments recorded against it? This can't be undone.")) return;
+      await postToSheet("deleteInvoice", { invoiceId: btn.dataset.id });
+      await refreshData(); renderSuppliersTab(el, project);
+    });
+  });
+  el.querySelectorAll(".delete-payment-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("Delete this payment record? This can't be undone.")) return;
+      await postToSheet("deletePayment", { paymentId: btn.dataset.id });
+      await refreshData(); renderSuppliersTab(el, project);
+    });
+  });
 }
 
 /* ---------- Documents tab — folders + real upload to Drive ---------- */
@@ -926,7 +992,7 @@ function renderDocumentsTab(el, project) {
           <button type="submit" class="login-submit" style="width:auto;padding:0.5rem 1rem;margin:0;">Upload</button>
         </form>
         ${files.length === 0 ? `<p style="font-size:0.85rem;color:var(--graphite-400);">No files uploaded to this folder yet.</p>` :
-          files.map((f) => `<div style="display:flex;justify-content:space-between;padding:0.5rem 0;border-bottom:1px solid var(--graphite-50);font-size:0.85rem;"><a href="${f.file_url}" target="_blank" style="color:var(--brass-600);">${escapeHtml(f.file_name)}</a><span style="color:var(--graphite-400);font-size:0.75rem;">${f.uploaded_by} · ${formatDate(f.uploaded_at)}</span></div>`).join("")}
+          files.map((f) => `<div class="doc-row" data-doc-id="${f.id}" style="display:flex;justify-content:space-between;align-items:center;padding:0.5rem 0;border-bottom:1px solid var(--graphite-50);font-size:0.85rem;"><a href="${f.file_url}" target="_blank" style="color:var(--brass-600);">${escapeHtml(f.file_name)}</a><div style="display:flex;align-items:center;gap:0.6rem;"><span style="color:var(--graphite-400);font-size:0.75rem;">${f.uploaded_by} · ${formatDate(f.uploaded_at)}</span><button class="filter-btn delete-doc-btn" style="padding:0.15rem 0.4rem;color:var(--bad);font-size:0.7rem;">🗑️</button></div></div>`).join("")}
       </div>
     </div>`;
     document.getElementById("back-to-folders").addEventListener("click", () => { state.openFolder = null; renderDocumentsTab(el, project); });
@@ -938,6 +1004,14 @@ function renderDocumentsTab(el, project) {
       const fileBase64 = await fileToBase64(fileInput.files[0]);
       await postToSheet("uploadDocument", { projectId: project.id, projectName: project.name, folder: state.openFolder, fileName: fileInput.files[0].name, mimeType: fileInput.files[0].type, fileBase64, uploadedBy: state.user.name });
       await refreshData(); renderDocumentsTab(el, project);
+    });
+    el.querySelectorAll(".delete-doc-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!confirm("Remove this file from the list? (The file itself stays safely in Google Drive — this only removes it from the dashboard.)")) return;
+        const docId = btn.closest("[data-doc-id]").dataset.docId;
+        await postToSheet("deleteDocument", { documentId: docId });
+        await refreshData(); renderDocumentsTab(el, project);
+      });
     });
     return;
   }
