@@ -110,7 +110,7 @@ const MOCK_DATA = {
 let state = {
   user: { name: "Mohamed", role: "owner" },
   route: "dashboard", projectId: null, workspaceTab: "Overview", openFolder: null, openSupplierId: null,
-  expandedKpi: null, notifOpen: false,
+  expandedKpi: null, notifOpen: false, editingSupplierId: null,
   projects: [], milestones: [], budgetCategories: [], remarks: [], suppliers: [], invoices: [], payments: [], documents: [],
 };
 
@@ -127,6 +127,7 @@ async function loadAllData() {
     };
   } catch (e) {
     console.error("Failed to load live data, falling back to mock data:", e);
+    alert("Couldn't load your Google Sheet data — showing sample data instead. Check the Apps Script URL in app.js and that it's deployed.");
     return { ...MOCK_DATA };
   }
 }
@@ -134,8 +135,17 @@ async function postToSheet(action, payload) {
   if (!USE_LIVE_DATA || !SHEETS_API_URL) { console.log("(offline mode)", action, payload); return { success: true, offline: true }; }
   try {
     const res = await fetch(SHEETS_API_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action, ...payload }) });
-    return await res.json();
-  } catch (e) { console.error("Save failed:", e); return { success: false, error: String(e) }; }
+    const result = await res.json();
+    if (!result.success) {
+      console.error("Save failed:", action, result.error);
+      alert("Couldn't save this — " + (result.error || "unknown error") + "\n\nCheck that your Google Sheet has a tab and headers matching this action, then try again.");
+    }
+    return result;
+  } catch (e) {
+    console.error("Save failed:", e);
+    alert("Couldn't reach the server to save this. Check your internet connection and that the Apps Script URL in app.js is correct.");
+    return { success: false, error: String(e) };
+  }
 }
 async function refreshData() {
   const data = await loadAllData();
@@ -226,7 +236,7 @@ function toggleNotifPanel() {
 /* ---------------- Navigation ---------------- */
 function navigate(route, projectId) {
   state.route = route; state.projectId = projectId || null; state.workspaceTab = "Overview";
-  state.openFolder = null; state.openSupplierId = null; state.expandedKpi = null;
+  state.openFolder = null; state.openSupplierId = null; state.expandedKpi = null; state.editingSupplierId = null;
   document.querySelectorAll(".nav-btn").forEach((b) => b.classList.toggle("active", b.dataset.route === route));
   render();
 }
@@ -485,7 +495,7 @@ function renderWorkspace(el) {
     <div class="tabs">${tabs.map((t) => `<button class="tab-btn ${state.workspaceTab === t ? "active" : ""}" data-tab="${t}">${t}</button>`).join("")}</div>
     <div id="tab-content" style="margin-top:1.5rem;"></div>`;
   document.getElementById("crumb-projects").addEventListener("click", (e) => { e.preventDefault(); navigate("projects"); });
-  el.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => { state.workspaceTab = b.dataset.tab; state.openFolder = null; state.openSupplierId = null; renderWorkspace(el); }));
+  el.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => { state.workspaceTab = b.dataset.tab; state.openFolder = null; state.openSupplierId = null; state.editingSupplierId = null; renderWorkspace(el); }));
   document.getElementById("toggle-edit-project").addEventListener("click", () => { showEditProject = !showEditProject; renderEditProjectForm(el, rawProject); });
   renderEditProjectForm(el, rawProject);
 
@@ -744,7 +754,7 @@ function renderSupplierList(el, project, suppliers) {
 
   // Group suppliers by category so this reads as a per-category spend report.
   const groups = {};
-  suppliers.forEach((s) => { const key = s.category || "Other"; (groups[key] = groups[key] || []).push(s); });
+  suppliers.forEach((s) => { const key = (s.category && String(s.category).trim()) || "Uncategorised"; (groups[key] = groups[key] || []).push(s); });
 
   listEl.innerHTML = Object.keys(groups).map((catName) => {
     const catSuppliers = groups[catName];
@@ -752,23 +762,37 @@ function renderSupplierList(el, project, suppliers) {
       <h3 style="font-size:0.9rem;color:var(--brass-600);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:0.6rem;">${escapeHtml(catName)}</h3>
       <div class="grid" style="grid-template-columns:1fr;gap:1rem;">
         ${catSuppliers.map((s) => {
+          const supplierName = s.name && String(s.name).trim() ? s.name : "(unnamed supplier)";
           const invoices = state.invoices.filter((i) => i.supplier_id === s.id);
           const invoiceTotal = invoices.reduce((sum, i) => sum + Number(i.amount || 0), 0);
           const paidTotal = invoices.reduce((sum, i) => { const pays = state.payments.filter((p) => p.invoice_id === i.id); return sum + pays.reduce((s2, p) => s2 + Number(p.amount || 0), 0); }, 0);
           const balance = Number(s.contract_value || 0) - paidTotal;
           const isOpen = state.openSupplierId === s.id;
-          return `<div class="card supplier-card">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;cursor:pointer;" data-toggle-supplier="${s.id}">
-              <div><h3 style="font-size:1rem;">${s.name} ${isOpen ? "▾" : "▸"}</h3><p style="font-size:0.78rem;color:var(--graphite-500);">${s.category}</p></div>
-              <span class="pct-pill" style="${balance > 0 ? "background:var(--warn-bg);color:var(--warn);" : "background:var(--good-bg);color:var(--good);"}">${balance > 0 ? "Balance Due" : "Settled"}</span>
+          const isEditing = state.editingSupplierId === s.id;
+          return `<div class="card supplier-card" data-supplier-row="${s.id}">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+              <div style="cursor:pointer;flex:1;" data-toggle-supplier="${s.id}">
+                <h3 style="font-size:1rem;">${escapeHtml(supplierName)} ${isOpen ? "▾" : "▸"}</h3><p style="font-size:0.78rem;color:var(--graphite-500);">${escapeHtml(catName)}</p>
+              </div>
+              <div style="display:flex;align-items:center;gap:0.5rem;">
+                <span class="pct-pill" style="${balance > 0 ? "background:var(--warn-bg);color:var(--warn);" : "background:var(--good-bg);color:var(--good);"}">${balance > 0 ? "Balance Due" : "Settled"}</span>
+                <button class="filter-btn edit-supplier-btn" data-id="${s.id}" style="padding:0.2rem 0.5rem;">${isEditing ? "✕" : "✏️"}</button>
+              </div>
             </div>
-            <div class="stat-grid">
-              <div><p style="font-size:0.7rem;color:var(--graphite-400);">Contract Amount</p><p class="mono" style="font-size:0.85rem;font-weight:600;">${formatAED(s.contract_value)}</p></div>
-              <div><p style="font-size:0.7rem;color:var(--graphite-400);">Invoiced</p><p class="mono" style="font-size:0.85rem;font-weight:600;">${formatAED(invoiceTotal)}</p></div>
-              <div><p style="font-size:0.7rem;color:var(--graphite-400);">Payment Done</p><p class="mono" style="font-size:0.85rem;font-weight:600;">${formatAED(paidTotal)}</p></div>
-              <div><p style="font-size:0.7rem;color:var(--graphite-400);">Balance Yet to Pay</p><p class="mono" style="font-size:0.85rem;font-weight:600;color:var(--bad);">${formatAED(balance)}</p></div>
-            </div>
-            ${isOpen ? renderSupplierDetail(project, s, invoices) : ""}
+            ${isEditing ? `
+              <form class="edit-supplier-form" data-id="${s.id}" style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.7rem;padding-top:0.7rem;border-top:1px solid var(--graphite-100);">
+                <input class="es-name" value="${escapeHtml(s.name || "")}" placeholder="Supplier name" style="flex:1;min-width:140px;border:1px solid var(--graphite-200);border-radius:0.4rem;padding:0.4rem 0.6rem;font-size:0.8rem;" />
+                <input class="es-category" value="${escapeHtml(s.category || "")}" placeholder="Category" style="flex:1;min-width:140px;border:1px solid var(--graphite-200);border-radius:0.4rem;padding:0.4rem 0.6rem;font-size:0.8rem;" />
+                <input class="es-contract" type="number" value="${Number(s.contract_value || 0)}" placeholder="Contract value" style="width:150px;border:1px solid var(--graphite-200);border-radius:0.4rem;padding:0.4rem 0.6rem;font-size:0.8rem;" />
+                <button type="submit" class="login-submit" style="width:auto;padding:0.4rem 0.9rem;margin:0;">Save</button>
+              </form>` : `
+              <div class="stat-grid">
+                <div><p style="font-size:0.7rem;color:var(--graphite-400);">Contract Amount</p><p class="mono" style="font-size:0.85rem;font-weight:600;">${formatAED(s.contract_value)}</p></div>
+                <div><p style="font-size:0.7rem;color:var(--graphite-400);">Invoiced</p><p class="mono" style="font-size:0.85rem;font-weight:600;">${formatAED(invoiceTotal)}</p></div>
+                <div><p style="font-size:0.7rem;color:var(--graphite-400);">Payment Done</p><p class="mono" style="font-size:0.85rem;font-weight:600;">${formatAED(paidTotal)}</p></div>
+                <div><p style="font-size:0.7rem;color:var(--graphite-400);">Balance Yet to Pay</p><p class="mono" style="font-size:0.85rem;font-weight:600;color:var(--bad);">${formatAED(balance)}</p></div>
+              </div>`}
+            ${isOpen && !isEditing ? renderSupplierDetail(project, s, invoices) : ""}
           </div>`;
         }).join("")}
       </div>
@@ -777,6 +801,22 @@ function renderSupplierList(el, project, suppliers) {
 
   listEl.querySelectorAll("[data-toggle-supplier]").forEach((row) => {
     row.addEventListener("click", () => { state.openSupplierId = state.openSupplierId === row.dataset.toggleSupplier ? null : row.dataset.toggleSupplier; renderSupplierList(el, project, suppliers); attachSupplierDetailHandlers(el, project); });
+  });
+  listEl.querySelectorAll(".edit-supplier-btn").forEach((btn) => {
+    btn.addEventListener("click", () => { state.editingSupplierId = state.editingSupplierId === btn.dataset.id ? null : btn.dataset.id; renderSupplierList(el, project, suppliers); attachSupplierDetailHandlers(el, project); });
+  });
+  listEl.querySelectorAll(".edit-supplier-form").forEach((form) => {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const supplierId = form.dataset.id;
+      const name = form.querySelector(".es-name").value.trim();
+      const category = form.querySelector(".es-category").value.trim();
+      const contractValue = form.querySelector(".es-contract").value;
+      await postToSheet("updateSupplier", { supplierId, name, category, contractValue });
+      state.editingSupplierId = null;
+      await refreshData();
+      renderSuppliersTab(el, project);
+    });
   });
   attachSupplierDetailHandlers(el, project);
 }
