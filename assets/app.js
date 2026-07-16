@@ -195,7 +195,10 @@ function initLogin() {
   document.getElementById("bell-btn").addEventListener("click", toggleNotifPanel);
 }
 
+const SESSION_KEY = "aptitude_session";
+
 async function enterApp() {
+  localStorage.setItem(SESSION_KEY, JSON.stringify(state.user));
   document.getElementById("view-login").style.display = "none";
   document.getElementById("app-shell").classList.add("active");
   const title = USER_CODES[state.user.name]?.title || state.user.name;
@@ -207,10 +210,23 @@ async function enterApp() {
   navigate("dashboard");
 }
 function logout() {
+  localStorage.removeItem(SESSION_KEY);
   document.getElementById("app-shell").classList.remove("active");
   document.getElementById("view-login").style.display = "flex";
   document.getElementById("login-password").value = "";
   document.getElementById("login-error").style.display = "none";
+}
+/** Restores a saved session on page load, so refreshing doesn't log you out. */
+function restoreSession() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+    if (saved && saved.name && USER_CODES[saved.name]) {
+      state.user = saved;
+      enterApp();
+      return true;
+    }
+  } catch (e) { /* ignore corrupt/old session data */ }
+  return false;
 }
 
 /* ---------------- Notifications (tagged remarks) ---------------- */
@@ -470,6 +486,9 @@ function renderAddProjectForm(el) {
     </form>`;
   document.getElementById("add-project-form").addEventListener("submit", async (e) => {
     e.preventDefault();
+    const btn = e.target.querySelector('button[type="submit"]');
+    if (btn.disabled) return;
+    btn.disabled = true; btn.textContent = "Saving…";
     const payload = {
       name: document.getElementById("np-name").value, brand: document.getElementById("np-brand").value,
       location: document.getElementById("np-location").value, city: document.getElementById("np-city").value,
@@ -564,6 +583,9 @@ function renderEditProjectForm(el, project) {
     </form>`;
   document.getElementById("edit-project-form").addEventListener("submit", async (e) => {
     e.preventDefault();
+    const btn = e.target.querySelector('button[type="submit"]');
+    if (btn.disabled) return;
+    btn.disabled = true; btn.textContent = "Saving…";
     const payload = {
       projectId: project.id,
       name: document.getElementById("ep-name").value, brand: document.getElementById("ep-brand").value,
@@ -631,8 +653,11 @@ function renderOverviewTab(el, project, remaining) {
     </div>`;
   document.getElementById("remark-form").addEventListener("submit", async (e) => {
     e.preventDefault();
+    const btn = e.target.querySelector('button[type="submit"]');
+    if (btn.disabled) return;
     const input = document.getElementById("remark-input");
     const text = input.value.trim(); if (!text) return;
+    btn.disabled = true; btn.textContent = "Posting…";
     const type = document.getElementById("remark-type").value;
     const tagged = Array.from(el.querySelectorAll(".tag-check:checked")).map((c) => c.value).join(", ");
     input.value = "";
@@ -695,9 +720,12 @@ function renderProgressTab(el, project) {
   document.getElementById("add-milestone-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const name = document.getElementById("mile-name").value.trim();
+    if (!name) return;
+    const btn = e.target.querySelector('button[type="submit"]');
+    if (btn.disabled) return;
+    btn.disabled = true; btn.textContent = "Saving…";
     const owner = document.getElementById("mile-owner").value.trim();
     const due = document.getElementById("mile-due").value;
-    if (!name) return;
     await postToSheet("addMilestone", { projectId: project.id, name, owner, due });
     await refreshData(); renderProgressTab(el, project);
   });
@@ -766,8 +794,11 @@ function renderBudgetTab(el, project) {
   document.getElementById("add-category-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const name = document.getElementById("cat-name").value.trim();
-    const budget = document.getElementById("cat-budget").value;
     if (!name) return;
+    const btn = e.target.querySelector('button[type="submit"]');
+    if (btn.disabled) return;
+    btn.disabled = true; btn.textContent = "Saving…";
+    const budget = document.getElementById("cat-budget").value;
     await postToSheet("addBudgetCategory", { projectId: project.id, name, budget });
     await refreshData(); renderBudgetTab(el, project);
   });
@@ -812,9 +843,12 @@ function renderSuppliersTab(el, project) {
   document.getElementById("add-supplier-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const name = document.getElementById("sup-name").value.trim();
+    if (!name) return;
+    const btn = e.target.querySelector('button[type="submit"]');
+    if (btn.disabled) return;
+    btn.disabled = true; btn.textContent = "Saving…";
     const category = document.getElementById("sup-category").value.trim() || "Other";
     const contractValue = document.getElementById("sup-contract").value;
-    if (!name) return;
     await postToSheet("addSupplier", { projectId: project.id, name, category, contractValue });
     await refreshData(); renderSuppliersTab(el, project);
   });
@@ -889,6 +923,9 @@ function renderSupplierList(el, project, suppliers) {
   listEl.querySelectorAll(".edit-supplier-form").forEach((form) => {
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
+      const btn = form.querySelector('button[type="submit"]');
+      if (btn.disabled) return;
+      btn.disabled = true; btn.textContent = "Saving…";
       const supplierId = form.dataset.id;
       const name = form.querySelector(".es-name").value.trim();
       const category = form.querySelector(".es-category").value.trim();
@@ -939,10 +976,12 @@ function attachSupplierDetailHandlers(el, project) {
   el.querySelectorAll(".add-invoice-form").forEach((form) => {
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
+      const btn = form.querySelector("button");
+      if (btn.disabled) return;
+      btn.disabled = true; btn.textContent = "Saving…";
       const supplierId = form.dataset.supplier;
       const invoiceNo = form.querySelector(".inv-no").value, amount = form.querySelector(".inv-amount").value, invoiceDate = form.querySelector(".inv-date").value;
       const fileInput = form.querySelector(".inv-file");
-      const btn = form.querySelector("button"); btn.textContent = "Saving…";
       let fileBase64 = "", fileName = "", mimeType = "";
       if (fileInput.files[0]) { fileBase64 = await fileToBase64(fileInput.files[0]); fileName = fileInput.files[0].name; mimeType = fileInput.files[0].type; }
       await postToSheet("addInvoice", { supplierId, invoiceNo, amount, invoiceDate, projectName: project.name, fileBase64, fileName, mimeType });
@@ -952,10 +991,12 @@ function attachSupplierDetailHandlers(el, project) {
   el.querySelectorAll(".add-payment-form").forEach((form) => {
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
+      const btn = form.querySelector("button");
+      if (btn.disabled) return;
+      btn.disabled = true; btn.textContent = "Saving…";
       const invoiceId = form.dataset.invoice;
       const amount = form.querySelector(".pay-amount").value, paidDate = form.querySelector(".pay-date").value;
       const fileInput = form.querySelector(".pay-receipt");
-      const btn = form.querySelector("button"); btn.textContent = "Saving…";
       let fileBase64 = "", fileName = "", mimeType = "";
       if (fileInput.files[0]) { fileBase64 = await fileToBase64(fileInput.files[0]); fileName = fileInput.files[0].name; mimeType = fileInput.files[0].type; }
       await postToSheet("addPayment", { invoiceId, amount, paidDate, projectName: project.name, fileBase64, fileName, mimeType });
@@ -1000,7 +1041,9 @@ function renderDocumentsTab(el, project) {
       e.preventDefault();
       const fileInput = document.getElementById("doc-file");
       if (!fileInput.files[0]) return;
-      const btn = e.target.querySelector("button"); btn.textContent = "Uploading…";
+      const btn = e.target.querySelector("button");
+      if (btn.disabled) return;
+      btn.disabled = true; btn.textContent = "Uploading…";
       const fileBase64 = await fileToBase64(fileInput.files[0]);
       await postToSheet("uploadDocument", { projectId: project.id, projectName: project.name, folder: state.openFolder, fileName: fileInput.files[0].name, mimeType: fileInput.files[0].type, fileBase64, uploadedBy: state.user.name });
       await refreshData(); renderDocumentsTab(el, project);
@@ -1089,4 +1132,5 @@ function renderFullReportTab(el, project, remaining) {
 document.addEventListener("DOMContentLoaded", () => {
   initLogin();
   document.querySelectorAll(".nav-btn").forEach((b) => { if (b.dataset.route) b.addEventListener("click", () => navigate(b.dataset.route)); });
+  restoreSession();
 });
