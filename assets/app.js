@@ -1,51 +1,82 @@
 /* ============================================================
    Aptitude Project Control — plain JS app (no build step)
    ============================================================
-   Data currently comes from MOCK_DATA below. Once you've set up
-   Google Sheets + Apps Script (see docs/GOOGLE_SHEETS_SETUP.md),
-   paste your Web App URL into SHEETS_API_URL and set USE_LIVE_DATA
-   to true — loadProjects() will then fetch real rows instead.
+   Data comes from MOCK_DATA below until USE_LIVE_DATA is turned on.
+   Once your Google Sheet + Apps Script are connected (see
+   docs/step-by-step.md), paste your Web App URL into SHEETS_API_URL
+   and set USE_LIVE_DATA to true.
    ============================================================ */
 
-const SHEETS_API_URL = ""; // <-- paste your Apps Script Web App URL here later
-const USE_LIVE_DATA = false;
+const SHEETS_API_URL = "https://script.google.com/macros/s/AKfycbzpCuePxK8Mi8l_l5QH8tRrvPRFmqe3TkxhQsz1RJduCgdjMTF5SE6nxxKivlzvTUt6/exec";
+const USE_LIVE_DATA = true;
 
 function formatAED(n) {
-  return new Intl.NumberFormat("en-AE", { style: "currency", currency: "AED", maximumFractionDigits: 0 }).format(n);
+  return new Intl.NumberFormat("en-AE", { style: "currency", currency: "AED", maximumFractionDigits: 0 }).format(Number(n) || 0);
 }
 function formatDate(d) {
   return new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
-/* ---------------- Mock data (replace with Sheets data later) ---------------- */
+/* ---------------- Mock data (replaced by Sheets data once connected) ---------------- */
+const RAW_PROJECTS = [
+  { id: "prj-001", name: "Marina Walk Café", brand: "Aptitude Coffee Co.", location: "Marina Walk, Unit 12", city: "Abu Dhabi", manager: "Sara Al Mazrouei", status: "on-track", completion: 78, budget: 1450000, spent: 1040000, outstanding: 96500, openingDate: "2026-09-14", riskLevel: "Low", nextMilestone: "POS Installation" },
+  { id: "prj-002", name: "Yas Mall Kiosk", brand: "Aptitude Express", location: "Yas Mall, Level 1", city: "Abu Dhabi", manager: "Omar Haddad", status: "attention", completion: 54, budget: 620000, spent: 402000, outstanding: 58000, openingDate: "2026-08-02", riskLevel: "Medium", nextMilestone: "Authority Approvals" },
+  { id: "prj-003", name: "Reem Island Bistro", brand: "Aptitude Kitchen", location: "City of Lights, Reem Island", city: "Abu Dhabi", manager: "Fatima Noor", status: "delayed", completion: 31, budget: 2100000, spent: 890000, outstanding: 214000, openingDate: "2026-11-20", riskLevel: "High", nextMilestone: "Civil Work Completion" },
+  { id: "prj-004", name: "Al Ain Downtown Café", brand: "Aptitude Coffee Co.", location: "Downtown Al Ain", city: "Al Ain", manager: "Khalid Yousef", status: "on-track", completion: 92, budget: 980000, spent: 872000, outstanding: 12000, openingDate: "2026-08-18", riskLevel: "Low", nextMilestone: "Grand Opening" },
+  { id: "prj-005", name: "Dalma Mall Kiosk", brand: "Aptitude Express", location: "Dalma Mall, Ground Floor", city: "Abu Dhabi", manager: "Sara Al Mazrouei", status: "completed", completion: 100, budget: 540000, spent: 528000, outstanding: 0, openingDate: "2026-05-01", riskLevel: "Low", nextMilestone: "Archived" },
+  { id: "prj-006", name: "Saadiyat Retail Corner", brand: "Aptitude Kitchen", location: "Saadiyat Grove", city: "Abu Dhabi", manager: "Omar Haddad", status: "attention", completion: 47, budget: 1180000, spent: 610000, outstanding: 143000, openingDate: "2026-10-05", riskLevel: "Medium", nextMilestone: "Kitchen Equipment Delivery" },
+];
+
+const MILESTONE_TEMPLATE = [
+  ["Lease Signed", "Sara Al Mazrouei", "2026-03-01"], ["Design Approved", "Design Team", "2026-03-20"],
+  ["Authority Approvals", "Omar Haddad", "2026-04-10"], ["Fit-Out Started", "BuildRight", "2026-04-18"],
+  ["Civil Work", "BuildRight", "2026-05-10"], ["Electrical", "Al Noor Electrical", "2026-05-25"],
+  ["Plumbing", "Gulf Plumbing Co.", "2026-06-05"], ["HVAC", "CoolBreeze MEP", "2026-06-12"],
+  ["Kitchen Equipment", "Procurement", "2026-06-25"], ["Coffee Equipment", "Procurement", "2026-06-28"],
+  ["Furniture", "Procurement", "2026-07-05"], ["POS Installation", "IT Team", "2026-07-10"],
+  ["CCTV", "IT Team", "2026-07-10"], ["Deep Cleaning", "Ops Team", "2026-07-15"],
+  ["Recruitment", "HR Team", "2026-07-01"], ["Training", "Ops Team", "2026-07-18"],
+  ["Soft Opening", "Ops Team", "2026-07-25"], ["Grand Opening", "Ops Team", "2026-08-02"],
+];
+
+const BUDGET_TEMPLATE = [
+  ["Security Deposit", 0.08], ["Rent", 0.06], ["Designer", 0.03], ["Fit-Out", 0.26], ["Kitchen Equipment", 0.14],
+  ["Coffee Equipment", 0.06], ["Furniture", 0.07], ["POS", 0.02], ["IT", 0.015], ["CCTV", 0.012],
+  ["Electrical", 0.045], ["Plumbing", 0.026], ["HVAC", 0.05], ["Signage", 0.022], ["Licenses", 0.018],
+  ["Marketing", 0.028], ["Recruitment", 0.02], ["Initial Inventory", 0.025], ["Contingency", 0.04], ["Other", 0.01],
+];
+
+function buildMockMilestones() {
+  const rows = [];
+  RAW_PROJECTS.forEach((p) => {
+    const doneCount = Math.round((p.completion / 100) * MILESTONE_TEMPLATE.length);
+    MILESTONE_TEMPLATE.forEach((t, i) => {
+      let status = "pending";
+      if (i < doneCount) status = "done";
+      else if (i === doneCount) status = "in-progress";
+      rows.push({ id: `${p.id}-mile-${i + 1}`, project_id: p.id, name: t[0], status, progress: status === "done" ? 100 : status === "in-progress" ? 50 : 0, owner: t[1], due: t[2], remarks: "" });
+    });
+  });
+  return rows;
+}
+
+function buildMockBudget() {
+  const rows = [];
+  RAW_PROJECTS.forEach((p) => {
+    BUDGET_TEMPLATE.forEach((t, i) => {
+      const budget = Math.round((p.budget * t[1]) / 1000) * 1000;
+      const actual = Math.round(budget * (p.spent / p.budget) * (0.85 + Math.random() * 0.3));
+      rows.push({ id: `${p.id}-bud-${i + 1}`, project_id: p.id, name: t[0], budget, actual: Math.max(0, actual) });
+    });
+  });
+  return rows;
+}
+
 const MOCK_DATA = {
-  projects: [
-    { id: "prj-001", name: "Marina Walk Café", brand: "Aptitude Coffee Co.", location: "Marina Walk, Unit 12", city: "Abu Dhabi", manager: "Sara Al Mazrouei", status: "on-track", completion: 78, budget: 1450000, spent: 1040000, outstanding: 96500, openingDate: "2026-09-14", riskLevel: "Low", nextMilestone: "POS Installation" },
-    { id: "prj-002", name: "Yas Mall Kiosk", brand: "Aptitude Express", location: "Yas Mall, Level 1", city: "Abu Dhabi", manager: "Omar Haddad", status: "attention", completion: 54, budget: 620000, spent: 402000, outstanding: 58000, openingDate: "2026-08-02", riskLevel: "Medium", nextMilestone: "Authority Approvals" },
-    { id: "prj-003", name: "Reem Island Bistro", brand: "Aptitude Kitchen", location: "City of Lights, Reem Island", city: "Abu Dhabi", manager: "Fatima Noor", status: "delayed", completion: 31, budget: 2100000, spent: 890000, outstanding: 214000, openingDate: "2026-11-20", riskLevel: "High", nextMilestone: "Civil Work Completion" },
-    { id: "prj-004", name: "Al Ain Downtown Café", brand: "Aptitude Coffee Co.", location: "Downtown Al Ain", city: "Al Ain", manager: "Khalid Yousef", status: "on-track", completion: 92, budget: 980000, spent: 872000, outstanding: 12000, openingDate: "2026-08-18", riskLevel: "Low", nextMilestone: "Grand Opening" },
-    { id: "prj-005", name: "Dalma Mall Kiosk", brand: "Aptitude Express", location: "Dalma Mall, Ground Floor", city: "Abu Dhabi", manager: "Sara Al Mazrouei", status: "completed", completion: 100, budget: 540000, spent: 528000, outstanding: 0, openingDate: "2026-05-01", riskLevel: "Low", nextMilestone: "Archived" },
-    { id: "prj-006", name: "Saadiyat Retail Corner", brand: "Aptitude Kitchen", location: "Saadiyat Grove", city: "Abu Dhabi", manager: "Omar Haddad", status: "attention", completion: 47, budget: 1180000, spent: 610000, outstanding: 143000, openingDate: "2026-10-05", riskLevel: "Medium", nextMilestone: "Kitchen Equipment Delivery" },
-  ],
-  budgetCategories: [
-    ["Security Deposit", 120000, 120000], ["Rent", 90000, 90000], ["Designer", 45000, 48500],
-    ["Fit-Out", 380000, 312000], ["Kitchen Equipment", 210000, 198000], ["Coffee Equipment", 95000, 91000],
-    ["Furniture", 110000, 76000], ["POS", 28000, 0], ["IT", 22000, 14500], ["CCTV", 18000, 18000],
-    ["Electrical", 65000, 63200], ["Plumbing", 38000, 35400], ["HVAC", 74000, 70100], ["Signage", 32000, 9000],
-    ["Licenses", 26000, 24500], ["Marketing", 40000, 6000], ["Recruitment", 30000, 11000],
-    ["Initial Inventory", 36000, 0], ["Contingency", 60000, 8200], ["Other", 15000, 4600],
-  ].map(([name, budget, actual]) => ({ name, budget, actual })),
-  milestones: [
-    ["Lease Signed", "done", "Sara Al Mazrouei", "2026-03-01"], ["Design Approved", "done", "Design Team", "2026-03-20"],
-    ["Authority Approvals", "done", "Omar Haddad", "2026-04-10"], ["Fit-Out Started", "done", "BuildRight", "2026-04-18"],
-    ["Civil Work", "done", "BuildRight", "2026-05-10"], ["Electrical", "done", "Al Noor Electrical", "2026-05-25"],
-    ["Plumbing", "in-progress", "Gulf Plumbing Co.", "2026-06-05"], ["HVAC", "in-progress", "CoolBreeze MEP", "2026-06-12"],
-    ["Kitchen Equipment", "pending", "Procurement", "2026-06-25"], ["Coffee Equipment", "pending", "Procurement", "2026-06-28"],
-    ["Furniture", "pending", "Procurement", "2026-07-05"], ["POS Installation", "pending", "IT Team", "2026-07-10"],
-    ["CCTV", "pending", "IT Team", "2026-07-10"], ["Deep Cleaning", "pending", "Ops Team", "2026-07-15"],
-    ["Recruitment", "in-progress", "HR Team", "2026-07-01"], ["Training", "pending", "Ops Team", "2026-07-18"],
-    ["Soft Opening", "pending", "Ops Team", "2026-07-25"], ["Grand Opening", "pending", "Ops Team", "2026-08-02"],
-  ].map(([name, status, owner, due]) => ({ name, status, owner, due })),
+  projects: RAW_PROJECTS,
+  milestones: buildMockMilestones(),
+  budgetCategories: buildMockBudget(),
+  remarks: [],
   suppliers: [
     { name: "BuildRight Contracting", category: "Fit-Out", contract: 380000, invoiced: 312000, paid: 260000 },
     { name: "Al Noor Electrical", category: "Electrical", contract: 65000, invoiced: 63200, paid: 63200 },
@@ -57,34 +88,73 @@ const MOCK_DATA = {
     { text: "Invoice #INV-2291 uploaded by BuildRight Contracting", time: "2h ago" },
     { text: "Plumbing milestone marked in-progress", time: "5h ago" },
     { text: "Payment of AED 45,000 recorded to Al Noor Electrical", time: "1d ago" },
-    { text: "Design Approved milestone completed", time: "3d ago" },
-    { text: "New site photos uploaded — Reem Island Bistro", time: "3d ago" },
   ],
   folders: ["Lease", "Contracts", "Design Drawings", "Municipality", "Invoices", "Purchase Orders", "Approvals", "Completion Photos", "Opening Photos", "Completion Certificate"],
 };
 
-let state = { user: { name: "Mohamed", role: "owner" }, route: "dashboard", projectId: null, workspaceTab: "Overview", projects: MOCK_DATA.projects };
+let state = {
+  user: { name: "Mohamed", role: "owner" },
+  route: "dashboard",
+  projectId: null,
+  workspaceTab: "Overview",
+  projects: MOCK_DATA.projects,
+  milestones: MOCK_DATA.milestones,
+  budgetCategories: MOCK_DATA.budgetCategories,
+  remarks: MOCK_DATA.remarks,
+};
 
-/* ---------------- Data loading (swap-ready for Google Sheets) ---------------- */
-async function loadProjects() {
-  if (!USE_LIVE_DATA || !SHEETS_API_URL) return MOCK_DATA.projects;
+/* ---------------- Data loading + saving (Google Sheets bridge) ---------------- */
+async function loadAllData() {
+  if (!USE_LIVE_DATA || !SHEETS_API_URL) {
+    return { projects: MOCK_DATA.projects, milestones: MOCK_DATA.milestones, budgetCategories: MOCK_DATA.budgetCategories, remarks: MOCK_DATA.remarks };
+  }
   try {
-    const res = await fetch(`${SHEETS_API_URL}?action=projects`);
+    const res = await fetch(SHEETS_API_URL);
     const data = await res.json();
-    return data.projects;
+    return {
+      projects: data.projects || [],
+      milestones: data.milestones || [],
+      budgetCategories: data.budgetCategories || [],
+      remarks: data.remarks || [],
+    };
   } catch (e) {
     console.error("Failed to load live data, falling back to mock data:", e);
-    return MOCK_DATA.projects;
+    return { projects: MOCK_DATA.projects, milestones: MOCK_DATA.milestones, budgetCategories: MOCK_DATA.budgetCategories, remarks: MOCK_DATA.remarks };
+  }
+}
+
+/** Sends a write action to Apps Script. Uses text/plain to avoid CORS preflight issues with Apps Script. */
+async function postToSheet(action, payload) {
+  if (!USE_LIVE_DATA || !SHEETS_API_URL) {
+    console.log("(offline mode — would have sent)", action, payload);
+    return { success: true, offline: true };
+  }
+  try {
+    const res = await fetch(SHEETS_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action, ...payload }),
+    });
+    return await res.json();
+  } catch (e) {
+    console.error("Save failed:", e);
+    return { success: false, error: String(e) };
   }
 }
 
 /* ---------------- Status badge helper ---------------- */
 const STATUS_LABEL = { "on-track": "On Track", attention: "Attention", delayed: "Delayed", completed: "Completed" };
 function badge(status) {
-  return `<span class="badge ${status}"><span class="dot"></span>${STATUS_LABEL[status]}</span>`;
+  return `<span class="badge ${status}"><span class="dot"></span>${STATUS_LABEL[status] || status}</span>`;
 }
 
 /* ---------------- Login ---------------- */
+const USER_CODES = {
+  Mohamed: { code: "9593", title: "Owner", role: "owner" },
+  Deven: { code: "34380", title: "Operations Manager", role: "operations" },
+  Mansoor: { code: "5398", title: "Accountant", role: "accounts" },
+};
+
 function initLogin() {
   const roleBtns = document.querySelectorAll(".role-btn");
   roleBtns.forEach((btn) => {
@@ -92,23 +162,40 @@ function initLogin() {
       roleBtns.forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
       state.user = { name: btn.dataset.name, role: btn.dataset.role };
+      document.getElementById("login-error").style.display = "none";
     });
   });
   document.getElementById("login-form").addEventListener("submit", (e) => {
     e.preventDefault();
-    enterApp();
+    const enteredCode = document.getElementById("login-password").value.trim();
+    const expected = USER_CODES[state.user.name];
+    const errorEl = document.getElementById("login-error");
+    if (expected && enteredCode === expected.code) {
+      errorEl.style.display = "none";
+      enterApp();
+    } else {
+      errorEl.style.display = "block";
+    }
   });
 }
 
 async function enterApp() {
   document.getElementById("view-login").style.display = "none";
-  const shell = document.getElementById("app-shell");
-  shell.classList.add("active");
+  document.getElementById("app-shell").classList.add("active");
+  const title = USER_CODES[state.user.name]?.title || state.user.name;
   document.getElementById("sidebar-user-name").textContent = state.user.name;
-  document.getElementById("sidebar-user-role").textContent = state.user.role === "owner" ? "Owner" : state.user.name;
+  document.getElementById("sidebar-user-role").textContent = title;
   document.getElementById("sidebar-user-avatar").textContent = state.user.name.slice(0, 2).toUpperCase();
 
-  state.projects = await loadProjects();
+  const content = document.getElementById("content");
+  content.innerHTML = `<p class="loading-note">Loading data…</p>`;
+
+  const data = await loadAllData();
+  state.projects = data.projects;
+  state.milestones = data.milestones;
+  state.budgetCategories = data.budgetCategories;
+  state.remarks = data.remarks;
+
   navigate("dashboard");
 }
 
@@ -135,9 +222,9 @@ function render() {
 /* ---------------- Dashboard ---------------- */
 function renderDashboard(el) {
   const p = state.projects;
-  const totalBudget = p.reduce((s, x) => s + x.budget, 0);
-  const totalSpent = p.reduce((s, x) => s + x.spent, 0);
-  const totalOutstanding = p.reduce((s, x) => s + x.outstanding, 0);
+  const totalBudget = p.reduce((s, x) => s + Number(x.budget || 0), 0);
+  const totalSpent = p.reduce((s, x) => s + Number(x.spent || 0), 0);
+  const totalOutstanding = p.reduce((s, x) => s + Number(x.outstanding || 0), 0);
   const active = p.filter((x) => x.status !== "completed").length;
   const completed = p.filter((x) => x.status === "completed").length;
 
@@ -150,7 +237,6 @@ function renderDashboard(el) {
       ${kpi("Remaining Budget", formatAED(totalBudget - totalSpent), "good")}
       ${kpi("Outstanding Payments", formatAED(totalOutstanding), "bad")}
     </div>
-
     <div class="grid two-col" style="margin-top:1.5rem;">
       <div class="card">
         <div class="section-title"><h2>Recent Projects</h2><a href="#" id="view-all-link">View all →</a></div>
@@ -167,7 +253,6 @@ function renderDashboard(el) {
         <canvas id="statusChart" height="180"></canvas>
       </div>
     </div>
-
     <div class="grid two-col" style="margin-top:1.5rem;">
       <div class="card">
         <h2 style="font-size:1rem;">Budget vs Actual</h2>
@@ -183,7 +268,6 @@ function renderDashboard(el) {
           </div>`).join("")}
       </div>
     </div>
-
     <div class="grid two-col" style="margin-top:1.5rem;">
       <div class="card">
         <h2 style="font-size:1rem;margin-bottom:0.9rem;">Projects Requiring Approval</h2>
@@ -194,18 +278,16 @@ function renderDashboard(el) {
       </div>
       <div class="card">
         <h2 style="font-size:1rem;margin-bottom:0.9rem;">Upcoming Openings</h2>
-        ${[...p].sort((a, b) => a.openingDate.localeCompare(b.openingDate)).slice(0, 4).map((x) => `
+        ${[...p].sort((a, b) => String(a.openingDate).localeCompare(String(b.openingDate))).slice(0, 4).map((x) => `
           <div class="list-row" data-goto="${x.id}" style="border:1px solid var(--graphite-100);border-radius:0.5rem;margin-bottom:0.5rem;">
             <div><p class="name">${x.name}</p><p class="sub">${x.city}</p></div>
-            <p class="mono" style="font-size:0.78rem;color:var(--graphite-600);">${formatDate(x.openingDate).slice(0, 6)}</p>
+            <p class="mono" style="font-size:0.78rem;color:var(--graphite-600);">${formatDate(x.openingDate)}</p>
           </div>`).join("")}
       </div>
     </div>
   `;
-
   el.querySelectorAll("[data-goto]").forEach((r) => r.addEventListener("click", () => navigate("workspace", r.dataset.goto)));
   document.getElementById("view-all-link").addEventListener("click", (e) => { e.preventDefault(); navigate("projects"); });
-
   drawStatusChart(p);
   drawBudgetChart(p);
 }
@@ -223,7 +305,7 @@ function drawStatusChart(p) {
   const ctx = document.getElementById("statusChart");
   if (!ctx) return;
   const counts = { "on-track": 0, attention: 0, delayed: 0, completed: 0 };
-  p.forEach((x) => counts[x.status]++);
+  p.forEach((x) => { if (counts[x.status] !== undefined) counts[x.status]++; });
   if (statusChartInstance) statusChartInstance.destroy();
   statusChartInstance = new Chart(ctx, {
     type: "doughnut",
@@ -238,8 +320,8 @@ function drawBudgetChart(p) {
   budgetChartInstance = new Chart(ctx, {
     type: "bar",
     data: { labels: p.map((x) => x.name.split(" ")[0]), datasets: [
-      { label: "Budget", data: p.map((x) => x.budget), backgroundColor: "#DCE1E8", borderRadius: 4 },
-      { label: "Spent", data: p.map((x) => x.spent), backgroundColor: "#14181F", borderRadius: 4 },
+      { label: "Budget", data: p.map((x) => Number(x.budget || 0)), backgroundColor: "#DCE1E8", borderRadius: 4 },
+      { label: "Spent", data: p.map((x) => Number(x.spent || 0)), backgroundColor: "#14181F", borderRadius: 4 },
     ] },
     options: { plugins: { legend: { position: "bottom", labels: { boxWidth: 8, font: { size: 11 } } } }, scales: { y: { ticks: { callback: (v) => v / 1000 + "k" } } } },
   });
@@ -250,7 +332,6 @@ let activeFilter = "all";
 function renderProjects(el) {
   const filters = [["all", "All"], ["on-track", "On Track"], ["attention", "Attention"], ["delayed", "Delayed"], ["completed", "Completed"]];
   const list = activeFilter === "all" ? state.projects : state.projects.filter((p) => p.status === activeFilter);
-
   el.innerHTML = `
     <div class="filters">${filters.map(([v, l]) => `<button class="filter-btn ${activeFilter === v ? "active" : ""}" data-filter="${v}">${l}</button>`).join("")}</div>
     <div class="grid project-grid">
@@ -269,7 +350,7 @@ function renderProjects(el) {
           <div class="mini-grid">
             <div><p>Budget</p><p class="mono">${formatAED(p.budget)}</p></div>
             <div><p>Spent</p><p class="mono">${formatAED(p.spent)}</p></div>
-            <div><p>Remaining</p><p class="mono">${formatAED(p.budget - p.spent)}</p></div>
+            <div><p>Remaining</p><p class="mono">${formatAED(Number(p.budget) - Number(p.spent))}</p></div>
           </div>
           <p style="font-size:0.75rem;color:var(--graphite-500);margin-top:0.9rem;">📅 Opening ${formatDate(p.openingDate)}</p>
         </div>`).join("")}
@@ -282,7 +363,7 @@ function renderProjects(el) {
 /* ---------------- Project workspace ---------------- */
 function renderWorkspace(el) {
   const project = state.projects.find((p) => p.id === state.projectId) || state.projects[0];
-  const remaining = project.budget - project.spent;
+  const remaining = Number(project.budget) - Number(project.spent);
   const tabs = ["Overview", "Progress", "Budget", "Suppliers", "Documents"];
 
   el.innerHTML = `
@@ -296,19 +377,20 @@ function renderWorkspace(el) {
     <div class="tabs">${tabs.map((t) => `<button class="tab-btn ${state.workspaceTab === t ? "active" : ""}" data-tab="${t}">${t}</button>`).join("")}</div>
     <div id="tab-content" style="margin-top:1.5rem;"></div>
   `;
-
   document.getElementById("crumb-projects").addEventListener("click", (e) => { e.preventDefault(); navigate("projects"); });
   el.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => { state.workspaceTab = b.dataset.tab; renderWorkspace(el); }));
 
   const tabEl = document.getElementById("tab-content");
   if (state.workspaceTab === "Overview") renderOverviewTab(tabEl, project, remaining);
-  if (state.workspaceTab === "Progress") renderProgressTab(tabEl);
-  if (state.workspaceTab === "Budget") renderBudgetTab(tabEl);
+  if (state.workspaceTab === "Progress") renderProgressTab(tabEl, project);
+  if (state.workspaceTab === "Budget") renderBudgetTab(tabEl, project);
   if (state.workspaceTab === "Suppliers") renderSuppliersTab(tabEl);
   if (state.workspaceTab === "Documents") renderDocumentsTab(tabEl);
 }
 
+/* ---------- Overview + Remarks (everyone can post; owner especially) ---------- */
 function renderOverviewTab(el, project, remaining) {
+  const projectRemarks = state.remarks.filter((r) => r.project_id === project.id).slice().reverse();
   el.innerHTML = `
     <div class="grid two-col">
       <div>
@@ -325,11 +407,21 @@ function renderOverviewTab(el, project, remaining) {
             <div class="bar-bg" style="height:8px;"><div class="bar-fill" style="width:${project.completion}%"></div></div>
           </div>
         </div>
+
         <div class="card" style="margin-top:1rem;">
-          <h2 style="font-size:1rem;margin-bottom:1rem;">Recent Activity</h2>
-          <p style="font-size:0.85rem;">🔸 Plumbing milestone marked in-progress — 5h ago</p>
-          <p style="font-size:0.85rem;margin-top:0.6rem;">🔸 Invoice #INV-2291 uploaded — 2h ago</p>
-          <p style="font-size:0.85rem;margin-top:0.6rem;">🔸 Site photos added — 1d ago</p>
+          <h2 style="font-size:1rem;margin-bottom:1rem;">Remarks</h2>
+          <form id="remark-form" style="display:flex;gap:0.5rem;margin-bottom:1rem;">
+            <input id="remark-input" type="text" placeholder="Add a remark or comment…" style="flex:1;border:1px solid var(--graphite-200);border-radius:0.5rem;padding:0.55rem 0.7rem;font-size:0.85rem;" />
+            <button type="submit" class="login-submit" style="width:auto;padding:0.55rem 1.1rem;margin:0;">Post</button>
+          </form>
+          <div id="remarks-list">
+            ${projectRemarks.length === 0 ? `<p style="font-size:0.82rem;color:var(--graphite-400);">No remarks yet.</p>` :
+              projectRemarks.map((r) => `
+                <div style="border-bottom:1px solid var(--graphite-50);padding:0.6rem 0;">
+                  <p style="font-size:0.85rem;margin:0;">${escapeHtml(r.text)}</p>
+                  <p style="font-size:0.72rem;color:var(--graphite-400);margin:3px 0 0;">${r.author} (${r.role}) · ${new Date(r.timestamp).toLocaleString()}</p>
+                </div>`).join("")}
+          </div>
         </div>
       </div>
       <div class="card health-card">
@@ -342,56 +434,132 @@ function renderOverviewTab(el, project, remaining) {
       </div>
     </div>
   `;
+
+  document.getElementById("remark-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const input = document.getElementById("remark-input");
+    const text = input.value.trim();
+    if (!text) return;
+    const remark = { id: "local-" + Date.now(), project_id: project.id, author: state.user.name, role: state.user.role, text, timestamp: new Date().toISOString() };
+    state.remarks.push(remark);
+    input.value = "";
+    renderOverviewTab(el, project, remaining);
+    await postToSheet("addRemark", { projectId: project.id, author: state.user.name, role: state.user.role, text });
+  });
 }
 function field(label, value) {
   return `<div><p style="font-size:0.72rem;color:var(--graphite-400);">${label}</p><p style="font-size:0.85rem;font-weight:500;margin-top:0.2rem;">${value}</p></div>`;
 }
+function escapeHtml(str) {
+  const d = document.createElement("div");
+  d.innerText = str;
+  return d.innerHTML;
+}
 
-function renderProgressTab(el) {
+/* ---------- Progress tab — editable only for Operations (Deven) ---------- */
+function renderProgressTab(el, project) {
+  const canEdit = state.user.role === "operations";
   const icon = { done: "✅", "in-progress": "🟡", pending: "⚪" };
+  const list = state.milestones.filter((m) => m.project_id === project.id);
+
   el.innerHTML = `
     <div class="card" style="padding:0;">
       <div style="display:flex;justify-content:space-between;padding:1.1rem 1.2rem;border-bottom:1px solid var(--graphite-100);">
-        <h2 style="font-size:1rem;">Milestone Checklist</h2>
-        <p style="font-size:0.78rem;color:var(--graphite-500);">${MOCK_DATA.milestones.filter((m) => m.status === "done").length}/${MOCK_DATA.milestones.length} complete</p>
+        <h2 style="font-size:1rem;">Milestone Checklist ${canEdit ? "" : "<span style='font-size:0.72rem;color:var(--graphite-400);font-weight:400;'>(read-only — Deven can edit)</span>"}</h2>
+        <p style="font-size:0.78rem;color:var(--graphite-500);">${list.filter((m) => m.status === "done").length}/${list.length} complete</p>
       </div>
       <div style="padding:0 1.2rem;">
-        ${MOCK_DATA.milestones.map((m) => `
-          <div class="milestone-row">
-            <div class="left"><span>${icon[m.status]}</span>
-              <div><p style="font-size:0.87rem;font-weight:500;margin:0;">${m.name}</p><p style="font-size:0.75rem;color:var(--graphite-500);margin:2px 0 0;">${m.owner}</p></div>
+        ${list.map((m) => `
+          <div class="milestone-row" data-mid="${m.id}">
+            <div class="left"><span>${icon[m.status] || "⚪"}</span>
+              <div><p style="font-size:0.87rem;font-weight:500;margin:0;">${m.name}</p><p style="font-size:0.75rem;color:var(--graphite-500);margin:2px 0 0;">${m.owner} · Due ${formatDate(m.due)}</p></div>
             </div>
-            <div style="display:flex;align-items:center;gap:0.8rem;font-size:0.75rem;color:var(--graphite-500);">
-              <span>Due ${formatDate(m.due).slice(0, 6)}</span>
-              <button class="filter-btn" style="padding:0.3rem 0.6rem;">📷 Photo</button>
-            </div>
+            ${canEdit ? `
+              <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+                <select class="m-status filter-btn" style="padding:0.3rem 0.5rem;">
+                  <option value="pending" ${m.status === "pending" ? "selected" : ""}>Pending</option>
+                  <option value="in-progress" ${m.status === "in-progress" ? "selected" : ""}>In Progress</option>
+                  <option value="done" ${m.status === "done" ? "selected" : ""}>Done</option>
+                </select>
+                <input class="m-progress" type="number" min="0" max="100" value="${m.progress || 0}" style="width:60px;border:1px solid var(--graphite-200);border-radius:0.4rem;padding:0.25rem 0.4rem;font-size:0.8rem;" />
+                <input class="m-remarks" type="text" placeholder="Notes…" value="${m.remarks || ""}" style="width:140px;border:1px solid var(--graphite-200);border-radius:0.4rem;padding:0.25rem 0.5rem;font-size:0.8rem;" />
+                <button class="filter-btn save-milestone" style="padding:0.3rem 0.7rem;">Save</button>
+              </div>` : `
+              <div style="font-size:0.75rem;color:var(--graphite-500);">${m.progress || 0}% ${m.remarks ? "· " + escapeHtml(m.remarks) : ""}</div>`}
           </div>`).join("")}
       </div>
     </div>
   `;
+
+  if (canEdit) {
+    el.querySelectorAll(".save-milestone").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const row = btn.closest("[data-mid]");
+        const mid = row.dataset.mid;
+        const status = row.querySelector(".m-status").value;
+        const progress = row.querySelector(".m-progress").value;
+        const remarks = row.querySelector(".m-remarks").value;
+        const m = state.milestones.find((x) => x.id === mid);
+        if (m) { m.status = status; m.progress = progress; m.remarks = remarks; }
+        btn.textContent = "Saving…";
+        const result = await postToSheet("updateMilestone", { milestoneId: mid, status, progress, remarks });
+        btn.textContent = result.success ? "Saved ✓" : "Failed";
+        setTimeout(() => renderProgressTab(el, project), 600);
+      });
+    });
+  }
 }
 
-function renderBudgetTab(el) {
-  const totalBudget = MOCK_DATA.budgetCategories.reduce((s, c) => s + c.budget, 0);
-  const totalActual = MOCK_DATA.budgetCategories.reduce((s, c) => s + c.actual, 0);
-  const rows = MOCK_DATA.budgetCategories.map((c) => {
-    const variance = c.budget - c.actual;
-    const pct = Math.round((c.actual / c.budget) * 100);
+/* ---------- Budget tab — editable only for Accounts (Mansoor) ---------- */
+function renderBudgetTab(el, project) {
+  const canEdit = state.user.role === "accounts";
+  const list = state.budgetCategories.filter((c) => c.project_id === project.id);
+  const totalBudget = list.reduce((s, c) => s + Number(c.budget || 0), 0);
+  const totalActual = list.reduce((s, c) => s + Number(c.actual || 0), 0);
+
+  const rows = list.map((c) => {
+    const variance = Number(c.budget) - Number(c.actual);
+    const pct = Number(c.budget) ? Math.round((Number(c.actual) / Number(c.budget)) * 100) : 0;
     const pctStyle = pct > 100 ? "background:var(--bad-bg);color:var(--bad);" : pct > 85 ? "background:var(--warn-bg);color:var(--warn);" : "background:var(--good-bg);color:var(--good);";
-    return `<tr><td>${c.name}</td><td class="right mono">${formatAED(c.budget)}</td><td class="right mono">${formatAED(c.actual)}</td>
+    return `<tr data-cid="${c.id}">
+      <td>${c.name}</td>
+      <td class="right mono">${formatAED(c.budget)}</td>
+      <td class="right mono">
+        ${canEdit
+          ? `<input class="c-actual" type="number" value="${c.actual}" style="width:110px;text-align:right;border:1px solid var(--graphite-200);border-radius:0.4rem;padding:0.25rem 0.4rem;font-size:0.82rem;" />`
+          : formatAED(c.actual)}
+      </td>
       <td class="right mono" style="color:${variance < 0 ? "var(--bad)" : "var(--good)"}">${formatAED(variance)}</td>
-      <td class="right"><span class="pct-pill" style="${pctStyle}">${pct}%</span></td></tr>`;
+      <td class="right"><span class="pct-pill" style="${pctStyle}">${pct}%</span></td>
+      <td class="right">${canEdit ? `<button class="filter-btn save-budget" style="padding:0.25rem 0.6rem;">Save</button>` : ""}</td>
+    </tr>`;
   }).join("");
 
   el.innerHTML = `<div class="card" style="padding:0;overflow-x:auto;">
-    <h2 style="font-size:1rem;padding:1.1rem 1.2rem;border-bottom:1px solid var(--graphite-100);">Budget vs Actual</h2>
+    <h2 style="font-size:1rem;padding:1.1rem 1.2rem;border-bottom:1px solid var(--graphite-100);">Budget vs Actual ${canEdit ? "" : "<span style='font-size:0.72rem;color:var(--graphite-400);font-weight:400;'>(read-only — Mansoor can edit)</span>"}</h2>
     <table>
-      <thead><tr><th>Category</th><th class="right">Budget</th><th class="right">Actual</th><th class="right">Variance</th><th class="right">Spent %</th></tr></thead>
+      <thead><tr><th>Category</th><th class="right">Budget</th><th class="right">Actual</th><th class="right">Variance</th><th class="right">Spent %</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
       <tfoot><tr><td>Total</td><td class="right mono">${formatAED(totalBudget)}</td><td class="right mono">${formatAED(totalActual)}</td>
-        <td class="right mono">${formatAED(totalBudget - totalActual)}</td><td class="right mono">${Math.round((totalActual / totalBudget) * 100)}%</td></tr></tfoot>
+        <td class="right mono">${formatAED(totalBudget - totalActual)}</td><td class="right mono">${totalBudget ? Math.round((totalActual / totalBudget) * 100) : 0}%</td><td></td></tr></tfoot>
     </table>
   </div>`;
+
+  if (canEdit) {
+    el.querySelectorAll(".save-budget").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const row = btn.closest("[data-cid]");
+        const cid = row.dataset.cid;
+        const actual = row.querySelector(".c-actual").value;
+        const c = state.budgetCategories.find((x) => x.id === cid);
+        if (c) c.actual = actual;
+        btn.textContent = "Saving…";
+        const result = await postToSheet("updateBudget", { categoryId: cid, actual });
+        btn.textContent = result.success ? "Saved ✓" : "Failed";
+        setTimeout(() => renderBudgetTab(el, project), 600);
+      });
+    });
+  }
 }
 
 function renderSuppliersTab(el) {
