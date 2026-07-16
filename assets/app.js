@@ -635,14 +635,26 @@ function renderProgressTab(el, project) {
   const icon = { done: "✅", "in-progress": "🟡", pending: "⚪" };
   const list = state.milestones.filter((m) => m.project_id === project.id);
   el.innerHTML = `
+    <div class="card" style="margin-bottom:1rem;">
+      <h2 style="font-size:1rem;margin-bottom:0.5rem;">Add Milestone</h2>
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.6rem;">
+        ${MILESTONE_TEMPLATE.map((t) => `<button type="button" class="filter-btn preset-mile-btn" data-preset="${escapeHtml(t[0])}" style="padding:0.35rem 0.7rem;">+ ${t[0]}</button>`).join("")}
+      </div>
+      <form id="add-milestone-form" style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+        <input required id="mile-name" placeholder="Milestone name" style="flex:1;min-width:180px;border:1px solid var(--graphite-200);border-radius:0.5rem;padding:0.5rem 0.7rem;font-size:0.85rem;" />
+        <input id="mile-owner" placeholder="Responsible person" style="flex:1;min-width:160px;border:1px solid var(--graphite-200);border-radius:0.5rem;padding:0.5rem 0.7rem;font-size:0.85rem;" />
+        <input id="mile-due" type="date" style="width:160px;border:1px solid var(--graphite-200);border-radius:0.5rem;padding:0.5rem 0.7rem;font-size:0.85rem;" />
+        <button type="submit" class="login-submit" style="width:auto;padding:0.5rem 1.1rem;margin:0;">Add Milestone</button>
+      </form>
+    </div>
     <div class="card" style="padding:0;">
       <div style="display:flex;justify-content:space-between;padding:1.1rem 1.2rem;border-bottom:1px solid var(--graphite-100);">
         <h2 style="font-size:1rem;">Milestone Checklist</h2><p style="font-size:0.78rem;color:var(--graphite-500);">${list.filter((m) => m.status === "done").length}/${list.length} complete</p>
       </div>
       <div style="padding:0 1.2rem;">
-        ${list.map((m) => `
+        ${list.length === 0 ? `<p style="font-size:0.85rem;color:var(--graphite-400);padding:1rem 0;">No milestones yet — add one above.</p>` : list.map((m) => `
           <div class="milestone-row" data-mid="${m.id}">
-            <div class="left"><span>${icon[m.status] || "⚪"}</span><div><p style="font-size:0.87rem;font-weight:500;margin:0;">${m.name}</p><p style="font-size:0.75rem;color:var(--graphite-500);margin:2px 0 0;">${m.owner} · Due ${formatDate(m.due)}</p></div></div>
+            <div class="left"><span>${icon[m.status] || "⚪"}</span><div><p style="font-size:0.87rem;font-weight:500;margin:0;">${escapeHtml(safe(m.name, "(untitled milestone)"))}</p><p style="font-size:0.75rem;color:var(--graphite-500);margin:2px 0 0;">${escapeHtml(safe(m.owner, "Unassigned"))} · Due ${formatDate(m.due)}</p></div></div>
             <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
               <select class="m-status filter-btn" style="padding:0.3rem 0.5rem;">
                 <option value="pending" ${m.status === "pending" ? "selected" : ""}>Pending</option>
@@ -656,6 +668,16 @@ function renderProgressTab(el, project) {
           </div>`).join("")}
       </div>
     </div>`;
+  el.querySelectorAll(".preset-mile-btn").forEach((b) => b.addEventListener("click", () => { document.getElementById("mile-name").value = b.dataset.preset; }));
+  document.getElementById("add-milestone-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = document.getElementById("mile-name").value.trim();
+    const owner = document.getElementById("mile-owner").value.trim();
+    const due = document.getElementById("mile-due").value;
+    if (!name) return;
+    await postToSheet("addMilestone", { projectId: project.id, name, owner, due });
+    await refreshData(); renderProgressTab(el, project);
+  });
   el.querySelectorAll(".save-milestone").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const row = btn.closest("[data-mid]"); const mid = row.dataset.mid;
