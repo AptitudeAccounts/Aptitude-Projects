@@ -1211,7 +1211,6 @@ function attachSupplierDetailHandlers(el, project) {
       btn.disabled = true; btn.textContent = "Saving…";
       const invoiceId = form.dataset.invoice;
       const amount = form.querySelector(".pay-amount").value, paidDate = form.querySelector(".pay-date").value;
-      alert("DEBUG 1/2 — sending:\ninvoiceId: [" + invoiceId + "]\namount: [" + amount + "]\npaidDate: [" + paidDate + "]");
       const fileInput = form.querySelector(".pay-receipt");
       let fileBase64 = "", fileName = "", mimeType = "";
       if (fileInput.files[0]) {
@@ -1219,7 +1218,6 @@ function attachSupplierDetailHandlers(el, project) {
         fileBase64 = await fileToBase64(fileInput.files[0]); fileName = fileInput.files[0].name; mimeType = fileInput.files[0].type;
       }
       const result = await postToSheet("addPayment", { invoiceId, amount, paidDate, projectName: project.name, fileBase64, fileName, mimeType });
-      alert("DEBUG 2/2 — server said:\n" + JSON.stringify(result));
       btn.textContent = result.success ? "Saved ✓" : "Failed — see banner above";
       if (!result.success) { btn.disabled = false; return; }
       await refreshData(); renderSuppliersTab(el, project);
