@@ -260,6 +260,30 @@ tfoot td { font-weight:700; border-top:2px solid var(--graphite-200); border-bot
 .preview-card .pc-bar-fill { height: 100%; background: var(--brass-500); border-radius: 999px; }
 .preview-card .pc-meta { color: var(--graphite-400); font-size: 0.7rem; margin-top: 0.5rem; }
 
+.login-slide {
+  position: absolute; inset: 0; opacity: 0;
+  animation: slideCycle 18s infinite;
+}
+.login-slide:nth-child(1) { animation-delay: 0s; }
+.login-slide:nth-child(2) { animation-delay: 6s; }
+.login-slide:nth-child(3) { animation-delay: 12s; }
+@keyframes slideCycle {
+  0%     { opacity: 0; transform: translateY(8px); }
+  3%     { opacity: 1; transform: translateY(0); }
+  30%    { opacity: 1; transform: translateY(0); }
+  36%    { opacity: 0; transform: translateY(-8px); }
+  100%   { opacity: 0; }
+}
+.slide-dots { position: absolute; left: 3rem; bottom: 2.5rem; display: flex; gap: 0.4rem; }
+.slide-dots span { width: 22px; height: 3px; border-radius: 999px; background: rgba(255,255,255,0.15); overflow: hidden; position: relative; }
+.slide-dots span::after { content: ""; position: absolute; inset: 0; background: var(--brass-500); animation: dotFill 18s infinite; }
+.slide-dots span:nth-child(1)::after { animation-delay: 0s; }
+.slide-dots span:nth-child(2)::after { animation-delay: 6s; }
+.slide-dots span:nth-child(3)::after { animation-delay: 12s; }
+@keyframes dotFill { 0% { transform: scaleX(0); transform-origin: left; } 33% { transform: scaleX(1); transform-origin: left; } 34%,100% { transform: scaleX(0); transform-origin: left; } }
+.logo-strip { position: absolute; left: 3rem; bottom: 3.5rem; display: flex; align-items: center; gap: 0.6rem; }
+.logo-strip .lp { font-size: 0.68rem; font-weight: 600; letter-spacing: 0.04em; color: var(--graphite-400); background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); padding: 0.3rem 0.7rem; border-radius: 999px; }
+
 .login-panel { flex: 1; display: flex; align-items: center; justify-content: center; background: var(--graphite-950); padding: 1.5rem; position: relative; }
 @media (min-width: 900px) { .login-panel { flex: 0 0 460px; background: #12161F; } }
 
