@@ -16,7 +16,7 @@
   <div class="glow"></div>
   <div class="login-card">
     <div class="login-logo">
-      <img src="assets/logo.jpg" alt="Aptitude Group" style="background:white; padding:10px 20px; border-radius:10px;" />
+      <img class="logo-img" src="assets/logo.jpg" alt="Aptitude Group" style="background:white; padding:10px 20px; border-radius:10px;" onerror="handleLogoError(this)" />
       <p>Project Execution &amp; Financial Monitoring</p>
     </div>
     <form id="login-form">
@@ -41,7 +41,7 @@
 <div id="app-shell">
   <aside class="sidebar">
     <div class="login-logo" style="text-align:left;">
-      <img src="assets/logo.jpg" alt="Aptitude" style="height:24px; background:white; padding:5px 12px; border-radius:6px;" />
+      <img class="logo-img" src="assets/logo.jpg" alt="Aptitude" style="height:24px; background:white; padding:5px 12px; border-radius:6px;" onerror="handleLogoError(this)" />
     </div>
     <p class="sidebar-label">Project Control</p>
     <nav class="nav">
@@ -58,6 +58,12 @@
   <div class="main">
     <header class="topbar">
       <div><h1 id="topbar-title">Executive Dashboard</h1><p id="topbar-subtitle"></p></div>
+      <div class="topbar-actions">
+        <div class="bell-wrap">
+          <button class="bell-btn" id="bell-btn">🔔<span class="bell-badge hidden" id="bell-badge">0</span></button>
+          <div class="notif-panel hidden" id="notif-panel"></div>
+        </div>
+      </div>
     </header>
     <main class="content" id="content"></main>
   </div>
