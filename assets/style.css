@@ -190,8 +190,12 @@ tfoot td { font-weight:700; border-top:2px solid var(--graphite-200); border-bot
 
 .folder-grid { display:grid; grid-template-columns: repeat(2,1fr); gap:0.7rem; }
 @media (min-width:700px){ .folder-grid { grid-template-columns: repeat(4,1fr);} }
-.folder-btn { border:1px solid var(--graphite-100); border-radius: var(--radius); padding:1rem; text-align:center; background:white; }
+.folder-btn { border:1px solid var(--graphite-100); border-radius: var(--radius); padding:1rem; text-align:center; background:white; width:100%; }
 .folder-btn:hover { border-color: var(--graphite-300); background: var(--graphite-50); }
+.folder-card { position: relative; }
+.folder-rename-btn { position: absolute; top:6px; right:6px; z-index:2; background:white; border:1px solid var(--graphite-100); border-radius:6px; width:22px; height:22px; font-size:0.7rem; line-height:1; padding:0; cursor:pointer; display:flex; align-items:center; justify-content:center; opacity:0; transition:opacity 0.15s; }
+.folder-card:hover .folder-rename-btn { opacity:1; }
+.folder-rename-btn:hover { background: var(--graphite-50); border-color: var(--graphite-300); }
 
 .supplier-card .stat-grid { display:grid; grid-template-columns: repeat(2,1fr); gap:0.6rem; margin-top:0.8rem; }
 @media (min-width:600px){ .supplier-card .stat-grid { grid-template-columns: repeat(4,1fr);} }
